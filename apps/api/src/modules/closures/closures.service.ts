@@ -1,10 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
+import { closeTimeToMinutes, toLocalTimeParts } from '../../common/time/local-time';
 import { CreateClosureDto } from './dto/create-closure.dto';
 import { UpdateClosureDto } from './dto/update-closure.dto';
-
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 @Injectable()
 export class ClosuresService {
@@ -59,31 +58,13 @@ export class ClosuresService {
     const lottery = await this.prisma.lottery.findUnique({ where: { id: lotteryId } });
     if (!lottery || !lottery.active || lottery.blocked) return false;
 
-    const { dayOfWeek, minutesSinceMidnight } = this.toLocalParts(at);
+    const { dayOfWeek, minutesSinceMidnight } = toLocalTimeParts(at, this.timezone);
     const closure = await this.prisma.closure.findUnique({
       where: { lotteryId_dayOfWeek: { lotteryId, dayOfWeek } },
     });
     if (!closure) return false; // sin cierre configurado para ese día -> no se vende
 
-    const [closeHour, closeMinute] = closure.closeTime.split(':').map(Number);
-    return minutesSinceMidnight < closeHour * 60 + closeMinute;
-  }
-
-  private toLocalParts(date: Date): { dayOfWeek: number; minutesSinceMidnight: number } {
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: this.timezone,
-      weekday: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    });
-    const parts = formatter.formatToParts(date);
-    const weekday = parts.find((p) => p.type === 'weekday')?.value ?? 'Sun';
-    let hour = parseInt(parts.find((p) => p.type === 'hour')?.value ?? '0', 10);
-    const minute = parseInt(parts.find((p) => p.type === 'minute')?.value ?? '0', 10);
-    if (hour === 24) hour = 0; // Intl puede devolver "24" para medianoche con hour12:false
-
-    return { dayOfWeek: WEEKDAYS.indexOf(weekday), minutesSinceMidnight: hour * 60 + minute };
+    return minutesSinceMidnight < closeTimeToMinutes(closure.closeTime);
   }
 
   private async getOrThrow(id: string) {
