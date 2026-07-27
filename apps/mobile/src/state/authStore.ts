@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import * as SecureStore from 'expo-secure-store';
+import { deleteItem, getItem, setItem } from './secureStorage';
 import { API_URL } from '@/api/config';
 import { endpoints } from '@/api/endpoints';
 
@@ -28,18 +28,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   refreshToken: null,
 
   setSession: async ({ user, accessToken, refreshToken }) => {
-    await SecureStore.setItemAsync('refreshToken', refreshToken);
+    await setItem('refreshToken', refreshToken);
     set({ user, accessToken, refreshToken });
   },
 
   // Usado por el interceptor de refresh en api/client.ts -- no toca `user`, solo rota los tokens.
   updateTokens: async ({ accessToken, refreshToken }) => {
-    await SecureStore.setItemAsync('refreshToken', refreshToken);
+    await setItem('refreshToken', refreshToken);
     set({ accessToken, refreshToken });
   },
 
   hydrate: async () => {
-    const refreshToken = await SecureStore.getItemAsync('refreshToken');
+    const refreshToken = await getItem('refreshToken');
     if (refreshToken) set({ refreshToken });
   },
 
@@ -59,7 +59,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     }
 
-    await SecureStore.deleteItemAsync('refreshToken');
+    await deleteItem('refreshToken');
     set({ user: null, accessToken: null, refreshToken: null });
   },
 }));

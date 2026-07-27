@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
-import { ActivityIndicator, Button, Chip, FAB, HelperText, Menu, Modal, Portal, Text, TextInput } from 'react-native-paper';
+import { ActivityIndicator, Button, Chip, FAB, HelperText, Modal, Portal, Text, TextInput } from 'react-native-paper';
 import { colors } from '@/theme/colors';
 import { useAuthStore, type Role } from '@/state/authStore';
 import { useCreateUser, useDeactivateUser, useUsers } from '@/features/users/hooks';
+import { PlatformPicker } from '@/components/PlatformPicker';
 import type { AppUser } from '@/api/users';
 
 const ROLE_LABELS: Record<Role, string> = {
@@ -42,7 +43,6 @@ export default function UsersScreen() {
   const deactivateUser = useDeactivateUser();
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [roleMenuOpen, setRoleMenuOpen] = useState(false);
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -99,19 +99,14 @@ export default function UsersScreen() {
           <TextInput label="Usuario" value={username} onChangeText={setUsername} autoCapitalize="none" style={styles.field} />
           <TextInput label="Contraseña (mín. 8 caracteres)" value={password} onChangeText={setPassword} secureTextEntry style={styles.field} />
 
-          <Menu
-            visible={roleMenuOpen}
-            onDismiss={() => setRoleMenuOpen(false)}
-            anchor={
-              <Button mode="outlined" onPress={() => setRoleMenuOpen(true)} style={styles.field} textColor={colors.brandDark}>
-                {ROLE_LABELS[role]}
-              </Button>
-            }
-          >
-            {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
-              <Menu.Item key={r} title={ROLE_LABELS[r]} onPress={() => { setRole(r); setRoleMenuOpen(false); }} />
-            ))}
-          </Menu>
+          <PlatformPicker
+            options={(Object.keys(ROLE_LABELS) as Role[]).map((r) => ({ value: r, label: ROLE_LABELS[r] }))}
+            value={role}
+            onChange={setRole}
+            placeholder="Rol"
+            textColor={colors.brandDark}
+            style={styles.field}
+          />
 
           {error && <HelperText type="error">{error}</HelperText>}
 

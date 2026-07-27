@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Button, HelperText, Menu, Snackbar, Text, TextInput } from 'react-native-paper';
+import { Button, HelperText, Snackbar, Text, TextInput } from 'react-native-paper';
 import { router } from 'expo-router';
 import { randomUUID } from 'expo-crypto';
 import { colors } from '@/theme/colors';
 import { useAuthStore } from '@/state/authStore';
 import { useLotteries } from '@/features/lotteries/hooks';
+import { PlatformPicker } from '@/components/PlatformPicker';
 import type { Lottery } from '@/api/lotteries';
 import { useCreateSale } from '@/features/sales/hooks';
 import { ApiError, type Sale } from '@/api/sales';
@@ -20,7 +21,6 @@ export default function NewSaleScreen() {
   const sellerName = useAuthStore((s) => s.user?.name) ?? '';
   const printerDeviceId = usePrinterStore((s) => s.deviceId);
 
-  const [lotteryMenuOpen, setLotteryMenuOpen] = useState(false);
   const [lotteryId, setLotteryId] = useState<string | null>(null);
   const [numberPlayed, setNumberPlayed] = useState('');
   const [amount, setAmount] = useState('');
@@ -76,26 +76,14 @@ export default function NewSaleScreen() {
 
   return (
     <View style={styles.container}>
-      <Menu
-        visible={lotteryMenuOpen}
-        onDismiss={() => setLotteryMenuOpen(false)}
-        anchor={
-          <Button mode="outlined" onPress={() => setLotteryMenuOpen(true)} style={styles.field} textColor={colors.brandDark}>
-            {selectedLottery?.name ?? 'Seleccionar lotería'}
-          </Button>
-        }
-      >
-        {(lotteries ?? []).map((lottery: Lottery) => (
-          <Menu.Item
-            key={lottery.id}
-            title={lottery.name}
-            onPress={() => {
-              setLotteryId(lottery.id);
-              setLotteryMenuOpen(false);
-            }}
-          />
-        ))}
-      </Menu>
+      <PlatformPicker
+        options={(lotteries ?? []).map((l: Lottery) => ({ value: l.id, label: l.name }))}
+        value={lotteryId}
+        onChange={setLotteryId}
+        placeholder="Seleccionar lotería"
+        textColor={colors.brandDark}
+        style={styles.field}
+      />
 
       <TextInput
         label="Número jugado"

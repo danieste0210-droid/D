@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
-import { ActivityIndicator, Button, FAB, HelperText, IconButton, Menu, Modal, Portal, Text, TextInput } from 'react-native-paper';
+import { ActivityIndicator, Button, FAB, HelperText, IconButton, Modal, Portal, Text, TextInput } from 'react-native-paper';
 import { colors } from '@/theme/colors';
 import { useAuthStore } from '@/state/authStore';
 import { useCreateClosure, useDeleteClosure, useUpdateClosure, useClosures } from '@/features/closures/hooks';
 import { useLotteries } from '@/features/lotteries/hooks';
+import { PlatformPicker } from '@/components/PlatformPicker';
 import type { Closure } from '@/api/closures';
 import type { Lottery } from '@/api/lotteries';
 
@@ -51,8 +52,6 @@ export default function ClosuresScreen() {
   const deleteClosure = useDeleteClosure();
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [lotteryMenuOpen, setLotteryMenuOpen] = useState(false);
-  const [dayMenuOpen, setDayMenuOpen] = useState(false);
   const [lotteryId, setLotteryId] = useState<string | null>(null);
   const [dayOfWeek, setDayOfWeek] = useState<number | null>(null);
   const [closeTime, setCloseTime] = useState('');
@@ -121,33 +120,23 @@ export default function ClosuresScreen() {
                 Nuevo cierre
               </Text>
 
-              <Menu
-                visible={lotteryMenuOpen}
-                onDismiss={() => setLotteryMenuOpen(false)}
-                anchor={
-                  <Button mode="outlined" onPress={() => setLotteryMenuOpen(true)} style={styles.field} textColor={colors.brandDark}>
-                    {selectedLottery?.name ?? 'Seleccionar lotería'}
-                  </Button>
-                }
-              >
-                {(lotteries ?? []).map((l: Lottery) => (
-                  <Menu.Item key={l.id} title={l.name} onPress={() => { setLotteryId(l.id); setLotteryMenuOpen(false); }} />
-                ))}
-              </Menu>
+              <PlatformPicker
+                options={(lotteries ?? []).map((l: Lottery) => ({ value: l.id, label: l.name }))}
+                value={lotteryId}
+                onChange={setLotteryId}
+                placeholder="Seleccionar lotería"
+                textColor={colors.brandDark}
+                style={styles.field}
+              />
 
-              <Menu
-                visible={dayMenuOpen}
-                onDismiss={() => setDayMenuOpen(false)}
-                anchor={
-                  <Button mode="outlined" onPress={() => setDayMenuOpen(true)} style={styles.field} textColor={colors.brandDark}>
-                    {dayOfWeek !== null ? DAY_LABELS[dayOfWeek] : 'Seleccionar día'}
-                  </Button>
-                }
-              >
-                {DAY_LABELS.map((label, index) => (
-                  <Menu.Item key={label} title={label} onPress={() => { setDayOfWeek(index); setDayMenuOpen(false); }} />
-                ))}
-              </Menu>
+              <PlatformPicker
+                options={DAY_LABELS.map((label, index) => ({ value: String(index), label }))}
+                value={dayOfWeek !== null ? String(dayOfWeek) : null}
+                onChange={(v) => setDayOfWeek(Number(v))}
+                placeholder="Seleccionar día"
+                textColor={colors.brandDark}
+                style={styles.field}
+              />
 
               <TextInput
                 label="Hora de cierre (HH:mm, America/Panama)"
