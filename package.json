@@ -1,0 +1,19 @@
+{
+  "name": "cloverapp-panama",
+  "private": true,
+  "version": "0.1.0",
+  "description": "CloverApp Panama - administracion de ventas de loteria/chance (mobile + API)",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run start:dev --workspace=apps/api",
+    "dev:mobile": "npm run start --workspace=apps/mobile",
+    "build:api": "npm run build --workspace=apps/api",
+    "lint": "npm run lint --workspace=apps/api && npm run lint --workspace=apps/mobile",
+    "test": "npm run test --workspace=apps/api"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

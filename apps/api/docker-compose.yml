@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cloverapp
+      POSTGRES_PASSWORD: cloverapp
+      POSTGRES_DB: cloverapp
+    ports:
+      - "5432:5432"
+    volumes:
+      - cloverapp_pgdata:/var/lib/postgresql/data
+
+volumes:
+  cloverapp_pgdata:

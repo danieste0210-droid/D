@@ -1,0 +1,272 @@
+openapi: 3.0.3
+info:
+  title: CloverApp Panamá API
+  version: 0.1.0
+  description: >
+    Stub de referencia. La fuente de verdad interactiva se genera automáticamente
+    en /docs (Swagger, vía @nestjs/swagger) al levantar el servidor con `npm run dev:api`.
+servers:
+  - url: http://localhost:3000/v1
+security:
+  - bearerAuth: []
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Login con usuario y contraseña
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+                twoFactorCode: { type: string, description: "Requerido solo si el usuario tiene 2FA habilitado" }
+      responses:
+        "200": { description: "Access + refresh token, o { requiresTwoFactor: true } si falta el código TOTP" }
+        "401": { description: Credenciales o código de 2FA inválidos }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotar refresh token (el usado se revoca, se emite un par nuevo)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        "200": { description: Nuevo access + refresh token }
+        "401": { description: Refresh token inválido, expirado o revocado }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Revocar la sesión asociada a un refresh token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        "200": { description: Sesión revocada }
+
+  /auth/sessions:
+    get:
+      tags: [auth]
+      summary: Historial de sesiones/dispositivos del usuario autenticado
+      responses:
+        "200": { description: Lista de sesiones (sin exponer el refresh token crudo) }
+
+  /auth/2fa/setup:
+    post:
+      tags: [auth]
+      summary: Genera un secret TOTP nuevo (no activa 2FA todavía) y devuelve QR (rol admin/super)
+      responses: { "200": { description: "{ secret, otpauthUrl, qrCodeDataUrl }" } }
+  /auth/2fa/verify:
+    post:
+      tags: [auth]
+      summary: Confirma el código TOTP y activa 2FA para el usuario (rol admin/super)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, minLength: 6, maxLength: 6 }
+      responses: { "200": { description: 2FA activado } }
+  /auth/2fa/disable:
+    post:
+      tags: [auth]
+      summary: Desactiva 2FA (rol admin/super)
+      responses: { "200": { description: 2FA desactivado } }
+
+  /auth/push-token:
+    post:
+      tags: [auth]
+      summary: Registra/actualiza el Expo push token del dispositivo actual
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string, description: "Expo push token, formato ExponentPushToken[...]" }
+      responses: { "200": { description: Token registrado } }
+
+  /user/create:
+    post:
+      tags: [users]
+      summary: Crear usuario (roles super, admin)
+      responses:
+        "201": { description: Usuario creado }
+  /user/update/{id}:
+    patch:
+      tags: [users]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Usuario actualizado }
+  /user/delete/{id}:
+    delete:
+      tags: [users]
+      summary: Desactivar usuario (soft-delete, nunca borrado físico)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Usuario desactivado }
+  /user/super:
+    get:
+      tags: [users]
+      summary: Listar usuarios activos (rol super)
+      responses:
+        "200": { description: Lista de usuarios }
+
+  /lotteries/create:
+    post: { tags: [lotteries], responses: { "201": { description: Lotería creada } } }
+  /lotteries/edit/{id}:
+    patch:
+      tags: [lotteries]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: Lotería editada } }
+  /lotteries/block/{id}:
+    post:
+      tags: [lotteries]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: Lotería bloqueada } }
+  /lotteries/delete/{id}:
+    delete:
+      tags: [lotteries]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: Lotería eliminada } }
+  /lotteries/all:
+    get: { tags: [lotteries], responses: { "200": { description: Todas las loterías } } }
+  /lotteries/day:
+    get:
+      tags: [lotteries]
+      parameters:
+        - name: dayOfWeek
+          in: query
+          required: true
+          schema: { type: integer, minimum: 0, maximum: 6 }
+      responses: { "200": { description: Loterías activas para ese día } }
+  /lotteries/process/awards:
+    post:
+      tags: [lotteries]
+      summary: Procesa premios para un resultado (transaccional, ver NEXT_STEPS.md)
+      responses: { "200": { description: Premios procesados } }
+  /lotteries/results:
+    get:
+      tags: [lotteries]
+      parameters:
+        - name: lotteryId
+          in: query
+          required: true
+          schema: { type: string }
+      responses: { "200": { description: Resultados históricos } }
+  /lotteries/awards/user:
+    get: { tags: [lotteries], responses: { "200": { description: Premios del usuario autenticado } } }
+
+  /closures/create:
+    post: { tags: [closures], responses: { "201": { description: Cierre creado } } }
+  /closures/getAll:
+    get: { tags: [closures], responses: { "200": { description: Todos los cierres } } }
+  /closures/update/{id}:
+    patch:
+      tags: [closures]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: Cierre actualizado } }
+  /closures/delete/{id}:
+    delete:
+      tags: [closures]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: Cierre eliminado } }
+
+  /sale/process:
+    post:
+      tags: [sales]
+      summary: Registrar una venta (rol vendedor)
+      responses: { "201": { description: Venta creada } }
+  /sale/sales/all:
+    get: { tags: [sales], responses: { "200": { description: Todas las ventas } } }
+  /sale/sales/search:
+    get: { tags: [sales], responses: { "200": { description: Búsqueda filtrada } } }
+  /sale/sales/sumary:
+    get: { tags: [sales], responses: { "200": { description: Resumen agregado } } }
+  /sale/sales/ultsale:
+    get: { tags: [sales], responses: { "200": { description: Última venta del vendedor } } }
+  /sale/sales/delete/{id}:
+    delete:
+      tags: [sales]
+      summary: Cancelar venta propia (solo antes del cierre)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: Venta cancelada } }
+  /sale/admin/delete/{id}:
+    delete:
+      tags: [sales]
+      summary: Cancelación administrativa (auditada, sin restricción de cierre)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: Venta cancelada por admin } }
+
+  /sell/sells:
+    get: { tags: [sell], responses: { "200": { description: Ventas recientes (vista supervisor) } } }
+  /sell/superv:
+    get: { tags: [sell], responses: { "200": { description: Ventas de los vendedores del supervisor autenticado } } }
+
+  /reports/sales:
+    get:
+      tags: [reports]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses: { "200": { description: Resumen agregado por vendedor/lotería } }
+  /reports/sales/export/excel:
+    get:
+      tags: [reports]
+      summary: Descarga el detalle de ventas del rango como .xlsx
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: Archivo Excel
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: {}
+  /reports/sales/export/pdf:
+    get:
+      tags: [reports]
+      summary: Descarga el detalle de ventas del rango como .pdf
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: Archivo PDF
+          content:
+            application/pdf: {}
+
+  /tops/update:
+    get: { tags: [tops], responses: { "200": { description: Ranking de vendedores } } }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

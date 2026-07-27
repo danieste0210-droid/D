@@ -1,0 +1,207 @@
+// CloverApp Panamá - schema de datos
+// Ver README raíz para contexto del negocio.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Conexión directa (sin pooler) usada solo para `prisma migrate` -- el pooler de Neon
+  // (pgbouncer, modo transacción) no soporta los locks que requieren las migraciones.
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  super
+  admin
+  supervisor
+  vendedor
+}
+
+enum SaleStatus {
+  active
+  cancelled
+  paid
+}
+
+enum AwardStatus {
+  pending
+  paid
+  reversed
+}
+
+model User {
+  id           String    @id @default(uuid())
+  name         String
+  username     String    @unique
+  passwordHash String    @map("password_hash")
+  role         Role
+  active       Boolean   @default(true)
+  supervisorId String?   @map("supervisor_id")
+  supervisor   User?     @relation("SupervisorToVendors", fields: [supervisorId], references: [id])
+  vendors      User[]    @relation("SupervisorToVendors")
+
+  twoFactorEnabled Boolean @default(false) @map("two_factor_enabled")
+  // Cifrado en reposo con AES-256-GCM (ver common/crypto/secret-encryption.ts), nunca en texto
+  // plano. Se guarda aun sin confirmar 2FA todavía (ver auth 2fa/setup vs 2fa/verify).
+  twoFactorSecret  String? @map("two_factor_secret")
+
+  // Un solo token por usuario (simplificación del esqueleto) -- multi-dispositivo real
+  // necesitaría una tabla aparte ligada a UserSession en vez de a User.
+  expoPushToken String? @map("expo_push_token")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  sales           Sale[]            @relation("SellerSales")
+  cancelledSales  Sale[]            @relation("CancelledBySales")
+  processedResults Result[]         @relation("ProcessedByResults")
+  auditLogs       AuditLog[]
+  sessions        UserSession[]
+  scheduleChanges LotteryScheduleChange[]
+
+  @@map("users")
+}
+
+model UserSession {
+  id           String    @id @default(uuid())
+  userId       String    @map("user_id")
+  user         User      @relation(fields: [userId], references: [id])
+  deviceLabel  String?   @map("device_label")
+  ipAddress    String?   @map("ip_address")
+  userAgent    String?   @map("user_agent")
+  refreshToken String    @unique @map("refresh_token")
+  revokedAt    DateTime? @map("revoked_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  expiresAt    DateTime  @map("expires_at")
+
+  @@map("user_sessions")
+}
+
+model Lottery {
+  id        String   @id @default(uuid())
+  name      String
+  active    Boolean  @default(true)
+  blocked   Boolean  @default(false)
+  maxAmountPerNumber Decimal? @map("max_amount_per_number") @db.Decimal(12, 2)
+  // Multiplicador de pago sobre el monto jugado (p.ej. 60 = paga 60x). Placeholder de negocio:
+  // ajustar por tipo de jugada/lotería según la tabla de pagos real antes de operar con dinero.
+  payoutMultiplier Decimal @default(60) @map("payout_multiplier") @db.Decimal(6, 2)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  closures        Closure[]
+  sales           Sale[]
+  results         Result[]
+  scheduleChanges LotteryScheduleChange[]
+
+  @@map("lotteries")
+}
+
+// Horario de cierre por lotería y día de la semana. Timezone siempre America/Panama.
+model Closure {
+  id         String  @id @default(uuid())
+  lotteryId  String  @map("lottery_id")
+  lottery    Lottery @relation(fields: [lotteryId], references: [id])
+  dayOfWeek  Int     @map("day_of_week") // 0 = domingo ... 6 = sábado
+  closeTime  String  @map("close_time")  // "HH:mm" en America/Panama
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([lotteryId, dayOfWeek])
+  @@map("closures")
+}
+
+// Historial de cambios de horario (quién y cuándo modificó un cierre).
+model LotteryScheduleChange {
+  id         String   @id @default(uuid())
+  lotteryId  String   @map("lottery_id")
+  lottery    Lottery  @relation(fields: [lotteryId], references: [id])
+  changedById String  @map("changed_by_id")
+  changedBy  User     @relation(fields: [changedById], references: [id])
+  before     Json?
+  after      Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("lottery_schedule_changes")
+}
+
+model Sale {
+  id            String     @id @default(uuid())
+  sellerId      String     @map("seller_id")
+  seller        User       @relation("SellerSales", fields: [sellerId], references: [id])
+  lotteryId     String     @map("lottery_id")
+  lottery       Lottery    @relation(fields: [lotteryId], references: [id])
+  numberPlayed  String     @map("number_played")
+  amount        Decimal    @db.Decimal(12, 2)
+  ticketCode    String     @unique @map("ticket_code")
+  status        SaleStatus @default(active)
+
+  createdAt    DateTime  @default(now()) @map("created_at")
+  cancelledAt  DateTime? @map("cancelled_at")
+  cancelledById String?  @map("cancelled_by_id")
+  cancelledBy  User?     @relation("CancelledBySales", fields: [cancelledById], references: [id])
+  cancelReason String?   @map("cancel_reason")
+
+  award Award?
+
+  @@index([sellerId, createdAt])
+  @@index([lotteryId, createdAt])
+  @@map("sales")
+}
+
+model Result {
+  id             String   @id @default(uuid())
+  lotteryId      String   @map("lottery_id")
+  lottery        Lottery  @relation(fields: [lotteryId], references: [id])
+  drawDate       DateTime @map("draw_date")
+  winningNumber  String   @map("winning_number")
+  processedById  String   @map("processed_by_id")
+  processedBy    User     @relation("ProcessedByResults", fields: [processedById], references: [id])
+  processedAt    DateTime @default(now()) @map("processed_at")
+  reversedAt     DateTime? @map("reversed_at")
+  reversalReason String?   @map("reversal_reason")
+
+  awards Award[]
+
+  @@unique([lotteryId, drawDate])
+  @@map("results")
+}
+
+model Award {
+  id        String      @id @default(uuid())
+  saleId    String      @unique @map("sale_id")
+  sale      Sale        @relation(fields: [saleId], references: [id])
+  resultId  String      @map("result_id")
+  result    Result      @relation(fields: [resultId], references: [id])
+  amount    Decimal     @db.Decimal(12, 2)
+  status    AwardStatus @default(pending)
+  paidAt    DateTime?   @map("paid_at")
+  reversedAt DateTime?  @map("reversed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("awards")
+}
+
+// Log de auditoría inmutable para toda acción que mueva dinero o cambie configuración sensible.
+model AuditLog {
+  id       String   @id @default(uuid())
+  userId   String?  @map("user_id")
+  user     User?    @relation(fields: [userId], references: [id])
+  action   String
+  entity   String
+  entityId String?  @map("entity_id")
+  before   Json?
+  after    Json?
+  ipAddress String? @map("ip_address")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([entity, entityId])
+  @@map("audit_log")
+}

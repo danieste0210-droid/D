@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "CloverApp Panamá",
+    "slug": "cloverapp-panama",
+    "scheme": "cloverapp",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "backgroundColor": "#AB47BC"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.cloverapp.panama",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "Se usa Bluetooth para conectar con la impresora térmica de tickets."
+      }
+    },
+    "android": {
+      "package": "com.cloverapp.panama",
+      "adaptiveIcon": {
+        "backgroundColor": "#AB47BC"
+      },
+      "permissions": ["BLUETOOTH", "BLUETOOTH_ADMIN", "BLUETOOTH_CONNECT", "BLUETOOTH_SCAN"]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "color": "#AB47BC"
+        }
+      ]
+    ],
+    "extra": {
+      "apiUrl": "http://localhost:3000/v1"
+    }
+  }
+}
