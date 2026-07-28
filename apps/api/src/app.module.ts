@@ -15,8 +15,6 @@ import { LotteriesModule } from './modules/lotteries/lotteries.module';
 import { ClosuresModule } from './modules/closures/closures.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { ResultsModule } from './modules/results/results.module';
-import { SellModule } from './modules/sell/sell.module';
-import { TopsModule } from './modules/tops/tops.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { PayoutMultipliersModule } from './modules/payout-multipliers/payout-multipliers.module';
@@ -44,8 +42,6 @@ import { BlockedNumbersModule } from './modules/blocked-numbers/blocked-numbers.
     ClosuresModule,
     SalesModule,
     ResultsModule,
-    SellModule,
-    TopsModule,
     ReportsModule,
     PayoutMultipliersModule,
     BlockedNumbersModule,

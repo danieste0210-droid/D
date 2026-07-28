@@ -224,11 +224,6 @@ paths:
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses: { "200": { description: Venta cancelada por admin } }
 
-  /sell/sells:
-    get: { tags: [sell], responses: { "200": { description: Ventas recientes (vista supervisor) } } }
-  /sell/superv:
-    get: { tags: [sell], responses: { "200": { description: Ventas de los vendedores del supervisor autenticado } } }
-
   /reports/sales:
     get:
       tags: [reports]
@@ -260,9 +255,6 @@ paths:
           description: Archivo PDF
           content:
             application/pdf: {}
-
-  /tops/update:
-    get: { tags: [tops], responses: { "200": { description: Ranking de vendedores } } }
 
 components:
   securitySchemes:
