@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
 import { Role } from '@prisma/client';
 
 export class CreateUserDto {
@@ -18,4 +18,11 @@ export class CreateUserDto {
   @IsOptional()
   @IsString()
   supervisorId?: string;
+
+  // "% GANANCIA" del vendedor sobre sus ventas.
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  commissionPercent?: number;
 }

@@ -3,8 +3,8 @@ import { FlatList, ScrollView, StyleSheet, View } from 'react-native';
 import { ActivityIndicator, Button, HelperText, Modal, Portal, Snackbar, Text, TextInput } from 'react-native-paper';
 import { colors } from '@/theme/colors';
 import { useAuthStore } from '@/state/authStore';
-import { useLotteries, useLotteryResults } from '@/features/lotteries/hooks';
-import { useCreateResult, usePendingAwards, useReverseResult } from '@/features/results/hooks';
+import { useLotteries, useLotteryResults, useProcessAwards } from '@/features/lotteries/hooks';
+import { usePendingAwards, useReverseResult } from '@/features/results/hooks';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import type { Award, Result } from '@/api/results';
 import type { Lottery } from '@/api/lotteries';
@@ -15,7 +15,7 @@ function AwardRow({ award }: { award: Award }) {
       <View style={{ flex: 1 }}>
         <Text variant="titleMedium">#{award.sale?.numberPlayed ?? '—'}</Text>
         <Text variant="bodySmall" style={styles.muted}>
-          Vendedor: {award.sale?.sellerId ?? '—'}
+          Posición {award.position} · Vendedor: {award.sale?.sellerId ?? '—'}
         </Text>
       </View>
       <Text variant="titleMedium">${Number(award.amount).toFixed(2)}</Text>
@@ -27,7 +27,9 @@ function ResultRow({ result, canReverse, onReverse }: { result: Result; canRever
   return (
     <View style={styles.row}>
       <View style={{ flex: 1 }}>
-        <Text variant="titleMedium">Ganador: #{result.winningNumber}</Text>
+        <Text variant="titleMedium">
+          1ra: #{result.firstNumber} · 2da: #{result.secondNumber} · 3ra: #{result.thirdNumber}
+        </Text>
         <Text variant="bodySmall" style={styles.muted}>
           {new Date(result.drawDate).toLocaleDateString('es-PA')}
           {result.reversedAt ? ' · Revertido' : ''}
@@ -50,11 +52,13 @@ export default function ResultsScreen() {
 
   const { data: lotteries } = useLotteries();
   const { data: awards, isLoading: loadingAwards } = usePendingAwards();
-  const createResult = useCreateResult();
+  const processAwards = useProcessAwards();
   const reverseResult = useReverseResult();
 
   const [lotteryId, setLotteryId] = useState<string | null>(null);
-  const [winningNumber, setWinningNumber] = useState('');
+  const [firstNumber, setFirstNumber] = useState('');
+  const [secondNumber, setSecondNumber] = useState('');
+  const [thirdNumber, setThirdNumber] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<string | null>(null);
   const [resultToReverse, setResultToReverse] = useState<Result | null>(null);
@@ -62,16 +66,29 @@ export default function ResultsScreen() {
 
   const { data: results, isLoading: loadingResults } = useLotteryResults(lotteryId);
   const selectedLottery = lotteries?.find((l: Lottery) => l.id === lotteryId);
-  const isValid = !!lotteryId && winningNumber.trim().length > 0;
+  const numberPattern = /^\d{1,4}$/;
+  const isValid =
+    !!lotteryId &&
+    numberPattern.test(firstNumber.trim()) &&
+    numberPattern.test(secondNumber.trim()) &&
+    numberPattern.test(thirdNumber.trim());
 
   const handlePublish = async () => {
     if (!isValid || !lotteryId) return;
     setError(null);
     try {
       const drawDate = new Date().toISOString().slice(0, 10);
-      const { awardsCreated } = await createResult.mutateAsync({ lotteryId, drawDate, winningNumber: winningNumber.trim() });
+      const { awardsCreated } = await processAwards.mutateAsync({
+        lotteryId,
+        drawDate,
+        firstNumber: firstNumber.trim(),
+        secondNumber: secondNumber.trim(),
+        thirdNumber: thirdNumber.trim(),
+      });
       setSnackbar(`Resultado publicado — ${awardsCreated} premio(s) generado(s)`);
-      setWinningNumber('');
+      setFirstNumber('');
+      setSecondNumber('');
+      setThirdNumber('');
     } catch {
       setError('No se pudo publicar el resultado (¿ya existe uno para esta lotería hoy?)');
     }
@@ -112,17 +129,39 @@ export default function ResultsScreen() {
           style={styles.field}
         />
 
-        <TextInput
-          label="Número ganador"
-          value={winningNumber}
-          onChangeText={setWinningNumber}
-          keyboardType="number-pad"
-          style={styles.field}
-        />
+        <View style={styles.numbersRow}>
+          <TextInput
+            label="1ra"
+            value={firstNumber}
+            onChangeText={setFirstNumber}
+            keyboardType="number-pad"
+            style={[styles.field, { flex: 1 }]}
+          />
+          <TextInput
+            label="2da"
+            value={secondNumber}
+            onChangeText={setSecondNumber}
+            keyboardType="number-pad"
+            style={[styles.field, { flex: 1 }]}
+          />
+          <TextInput
+            label="3ra"
+            value={thirdNumber}
+            onChangeText={setThirdNumber}
+            keyboardType="number-pad"
+            style={[styles.field, { flex: 1 }]}
+          />
+        </View>
 
         {error && <HelperText type="error">{error}</HelperText>}
 
-        <Button mode="contained" onPress={handlePublish} loading={createResult.isPending} disabled={!isValid} buttonColor={colors.brand}>
+        <Button
+          mode="contained"
+          onPress={handlePublish}
+          loading={processAwards.isPending}
+          disabled={!isValid}
+          buttonColor={colors.brand}
+        >
           Publicar y calcular premios
         </Button>
       </View>
@@ -166,7 +205,7 @@ export default function ResultsScreen() {
       <Portal>
         <Modal visible={!!resultToReverse} onDismiss={closeReverseModal} contentContainerStyle={styles.modal}>
           <Text variant="titleMedium" style={{ marginBottom: 4 }}>
-            Revertir resultado #{resultToReverse?.winningNumber}
+            Revertir resultado #{resultToReverse?.firstNumber}/{resultToReverse?.secondNumber}/{resultToReverse?.thirdNumber}
           </Text>
           <Text variant="bodySmall" style={[styles.muted, { marginBottom: 16 }]}>
             Los premios pendientes de este resultado se anulan. Los ya pagados requieren revisión manual.
@@ -195,6 +234,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   form: { padding: 20, backgroundColor: colors.surface },
   field: { marginBottom: 12 },
+  numbersRow: { flexDirection: 'row', gap: 12 },
   sectionTitle: { marginTop: 20, marginBottom: 8, paddingHorizontal: 20 },
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12, backgroundColor: colors.surface },
   separator: { height: 1, backgroundColor: '#ECECEC' },

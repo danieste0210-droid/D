@@ -11,17 +11,6 @@ export function usePendingAwards() {
   });
 }
 
-export function useCreateResult() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: resultsApi.createResult,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [PENDING_AWARDS_KEY] });
-      queryClient.invalidateQueries({ queryKey: [LOTTERY_RESULTS_KEY] });
-    },
-  });
-}
-
 export function useReverseResult() {
   const queryClient = useQueryClient();
   return useMutation({

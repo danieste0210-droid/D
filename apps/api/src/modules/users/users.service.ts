@@ -1,5 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import { Role } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -21,12 +22,22 @@ export class UsersService {
         passwordHash,
         role: dto.role,
         supervisorId: dto.supervisorId,
+        commissionPercent: dto.commissionPercent,
       },
     });
   }
 
   findAllActive() {
     return this.prisma.user.findMany({ where: { deletedAt: null } });
+  }
+
+  findSupervisors() {
+    return this.prisma.user.findMany({ where: { role: Role.supervisor, deletedAt: null } });
+  }
+
+  // "Vendedores de: [Supervisor]" -- incluye % de comisión de cada vendedor.
+  findVendorsBySupervisor(supervisorId: string) {
+    return this.prisma.user.findMany({ where: { supervisorId, deletedAt: null } });
   }
 
   async update(id: string, dto: UpdateUserDto) {

@@ -20,6 +20,10 @@ export interface CreateSalePayload {
   amount: number;
 }
 
+export function listAllSales(): Promise<Sale[]> {
+  return apiFetch<Sale[]>(endpoints.sales.all);
+}
+
 export function searchSales(params: { sellerId?: string; lotteryId?: string }): Promise<Sale[]> {
   const query = new URLSearchParams(
     Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined)) as Record<string, string>,
@@ -33,6 +37,15 @@ export function createSale(payload: CreateSalePayload): Promise<Sale> {
 
 export function cancelSale(id: string, reason: string): Promise<Sale> {
   return apiFetch<Sale>(endpoints.sales.cancel(id), { method: 'DELETE', body: JSON.stringify({ reason }) });
+}
+
+// Cancelación administrativa: sin restricción de cierre, para la pantalla "Eliminar Ventas".
+export function adminCancelSale(id: string, reason: string): Promise<Sale> {
+  return apiFetch<Sale>(endpoints.sales.adminCancel(id), { method: 'DELETE', body: JSON.stringify({ reason }) });
+}
+
+export function getLastSale(): Promise<Sale | null> {
+  return apiFetch<Sale | null>(endpoints.sales.lastSale);
 }
 
 export { ApiError };

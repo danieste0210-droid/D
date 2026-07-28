@@ -6,7 +6,9 @@ export interface Result {
   id: string;
   lotteryId: string;
   drawDate: string;
-  winningNumber: string;
+  firstNumber: string;
+  secondNumber: string;
+  thirdNumber: string;
   processedById: string;
   processedAt: string;
   reversedAt: string | null;
@@ -17,20 +19,11 @@ export interface Award {
   id: string;
   saleId: string;
   resultId: string;
+  position: number;
   amount: string;
   status: 'pending' | 'paid' | 'reversed';
   paidAt: string | null;
   sale?: Sale;
-}
-
-export interface CreateResultPayload {
-  lotteryId: string;
-  drawDate: string;
-  winningNumber: string;
-}
-
-export function createResult(payload: CreateResultPayload): Promise<{ result: Result; awardsCreated: number }> {
-  return apiFetch(endpoints.results.create, { method: 'POST', body: JSON.stringify(payload) });
 }
 
 export function reverseResult(id: string, reason: string) {

@@ -16,6 +16,16 @@ export class ReportsController {
     return this.reportsService.salesByRange(new Date(from), new Date(to));
   }
 
+  @Get('global-sales')
+  globalSales(@Query('from') from: string, @Query('to') to: string) {
+    return this.reportsService.globalSales(new Date(from), new Date(to));
+  }
+
+  @Get('cancelled-sales')
+  cancelledSales(@Query('from') from: string, @Query('to') to: string) {
+    return this.reportsService.cancelledSales(new Date(from), new Date(to));
+  }
+
   @Get('sales/export/excel')
   async exportExcel(@Query('from') from: string, @Query('to') to: string, @Res() res: Response) {
     const buffer = await this.reportsService.salesReportExcel(new Date(from), new Date(to));

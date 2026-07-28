@@ -43,3 +43,14 @@ export function useLotteryResults(lotteryId: string | null) {
     enabled: !!lotteryId,
   });
 }
+
+export function useProcessAwards() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: lotteriesApi.processAwards,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lottery-results'] });
+      queryClient.invalidateQueries({ queryKey: ['pending-awards'] });
+    },
+  });
+}

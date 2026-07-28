@@ -28,3 +28,27 @@ export function useCancelSale() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: [MY_SALES_KEY] }),
   });
 }
+
+export function useLastSale() {
+  const userId = useAuthStore((s) => s.user?.id);
+  return useQuery({
+    queryKey: ['last-sale', userId],
+    queryFn: salesApi.getLastSale,
+    enabled: !!userId,
+  });
+}
+
+export function useAllSales() {
+  return useQuery({
+    queryKey: ['sales-all'],
+    queryFn: salesApi.listAllSales,
+  });
+}
+
+export function useAdminCancelSale() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) => salesApi.adminCancelSale(id, reason),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['sales-all'] }),
+  });
+}

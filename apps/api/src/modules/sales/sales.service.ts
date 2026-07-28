@@ -25,6 +25,13 @@ export class SalesService {
       throw new ForbiddenException('La lotería ya cerró para el horario actual');
     }
 
+    const blocked = await this.prisma.blockedNumber.findUnique({
+      where: { lotteryId_number: { lotteryId: dto.lotteryId, number: dto.numberPlayed } },
+    });
+    if (blocked) {
+      throw new ForbiddenException(`El número ${dto.numberPlayed} está bloqueado para esta lotería`);
+    }
+
     if (lottery.maxAmountPerNumber != null) {
       const alreadyPlayed = await this.prisma.sale.aggregate({
         where: { lotteryId: dto.lotteryId, numberPlayed: dto.numberPlayed, status: SaleStatus.active },

@@ -22,7 +22,7 @@ function LotteryRow({
       <View style={{ flex: 1 }}>
         <Text variant="titleMedium">{lottery.name}</Text>
         <Text variant="bodySmall" style={styles.muted}>
-          Límite/número: {lottery.maxAmountPerNumber ? `$${lottery.maxAmountPerNumber}` : 'sin límite'} · Pago: {lottery.payoutMultiplier}x
+          Límite/número: {lottery.maxAmountPerNumber ? `$${lottery.maxAmountPerNumber}` : 'sin límite'}
         </Text>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>

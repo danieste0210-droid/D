@@ -3,6 +3,9 @@ import { apiFetch } from './client';
 import { API_URL } from './config';
 import { endpoints } from './endpoints';
 import { useAuthStore } from '@/state/authStore';
+import type { Sale } from './sales';
+import type { AppUser } from './users';
+import type { Lottery } from './lotteries';
 
 export interface SalesSummaryRow {
   sellerId: string;
@@ -11,8 +14,25 @@ export interface SalesSummaryRow {
   _count: number;
 }
 
+export interface GlobalSalesReport {
+  totalSales: number;
+  totalPrizes: number;
+  netAmount: number;
+  numbersBreakdown: { number: string; count: number; amount: number }[];
+}
+
+export type CancelledSale = Sale & { seller: AppUser; lottery: Lottery; cancelledBy: AppUser | null };
+
 export function getSalesSummary(from: string, to: string): Promise<SalesSummaryRow[]> {
   return apiFetch<SalesSummaryRow[]>(`${endpoints.reports.sales}?from=${from}&to=${to}`);
+}
+
+export function getGlobalSales(from: string, to: string): Promise<GlobalSalesReport> {
+  return apiFetch<GlobalSalesReport>(`${endpoints.reports.globalSales}?from=${from}&to=${to}`);
+}
+
+export function getCancelledSales(from: string, to: string): Promise<CancelledSale[]> {
+  return apiFetch<CancelledSale[]>(`${endpoints.reports.cancelledSales}?from=${from}&to=${to}`);
 }
 
 // Los endpoints de export devuelven binarios (xlsx/pdf), no JSON -- apiFetch no sirve aquí.

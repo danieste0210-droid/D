@@ -1,23 +1,12 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { AwardStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateResultDto } from './dto/create-result.dto';
 
-// TODO(results): notificar vendedores/clientes (WhatsApp o push) tras publicar el resultado.
+// Publicar resultados (con cálculo de premios) vive en lotteries.service.processAwards() --
+// este servicio solo maneja reversión y consultas de premios.
 @Injectable()
 export class ResultsService {
   constructor(private readonly prisma: PrismaService) {}
-
-  create(dto: CreateResultDto, processedById: string) {
-    return this.prisma.result.create({
-      data: {
-        lotteryId: dto.lotteryId,
-        drawDate: new Date(dto.drawDate),
-        winningNumber: dto.winningNumber,
-        processedById,
-      },
-    });
-  }
 
   // Reversión de un resultado erróneo: nunca se borra, se marca revertido (log inmutable vía
   // AuditInterceptor en el controller). Los awards "pending" asociados se marcan reversed;

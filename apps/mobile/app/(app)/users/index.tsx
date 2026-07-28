@@ -3,7 +3,7 @@ import { FlatList, StyleSheet, View } from 'react-native';
 import { ActivityIndicator, Button, Chip, FAB, HelperText, Modal, Portal, Text, TextInput } from 'react-native-paper';
 import { colors } from '@/theme/colors';
 import { useAuthStore, type Role } from '@/state/authStore';
-import { useCreateUser, useDeactivateUser, useUsers } from '@/features/users/hooks';
+import { useCreateUser, useDeactivateUser, useUsers, useSupervisors } from '@/features/users/hooks';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import type { AppUser } from '@/api/users';
 
@@ -21,6 +21,7 @@ function UserRow({ user, onDeactivate }: { user: AppUser; onDeactivate: (id: str
         <Text variant="titleMedium">{user.name}</Text>
         <Text variant="bodySmall" style={styles.muted}>
           @{user.username} · {ROLE_LABELS[user.role]}
+          {user.commissionPercent ? ` · ${Number(user.commissionPercent)}% comisión` : ''}
         </Text>
       </View>
       {!user.active ? (
@@ -34,11 +35,11 @@ function UserRow({ user, onDeactivate }: { user: AppUser; onDeactivate: (id: str
   );
 }
 
-// El endpoint GET /user/super (listado) solo lo permite el backend para rol "super" -- por eso
-// esta pantalla completa se restringe a ese rol, aunque crear/desactivar también lo pueda admin.
+// GET /user/super (listado) lo permite el backend para "super" y "admin".
 export default function UsersScreen() {
   const currentRole = useAuthStore((s) => s.user?.role);
   const { data: users, isLoading } = useUsers();
+  const { data: supervisors } = useSupervisors();
   const createUser = useCreateUser();
   const deactivateUser = useDeactivateUser();
 
@@ -47,29 +48,45 @@ export default function UsersScreen() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<Role>('vendedor');
+  const [supervisorId, setSupervisorId] = useState<string | null>(null);
+  const [commissionPercent, setCommissionPercent] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const isValid = name.trim().length > 0 && username.trim().length > 0 && password.length >= 8;
+
+  const resetForm = () => {
+    setName('');
+    setUsername('');
+    setPassword('');
+    setRole('vendedor');
+    setSupervisorId(null);
+    setCommissionPercent('');
+  };
 
   const handleCreate = async () => {
     if (!isValid) return;
     setError(null);
     try {
-      await createUser.mutateAsync({ name: name.trim(), username: username.trim(), password, role });
-      setName('');
-      setUsername('');
-      setPassword('');
-      setRole('vendedor');
+      await createUser.mutateAsync({
+        name: name.trim(),
+        username: username.trim(),
+        password,
+        role,
+        supervisorId: role === 'vendedor' && supervisorId ? supervisorId : undefined,
+        commissionPercent:
+          role === 'vendedor' && commissionPercent ? parseFloat(commissionPercent.replace(',', '.')) : undefined,
+      });
+      resetForm();
       setModalOpen(false);
     } catch {
       setError('No se pudo crear el usuario (¿el usuario ya existe?)');
     }
   };
 
-  if (currentRole !== 'super') {
+  if (currentRole !== 'super' && currentRole !== 'admin') {
     return (
       <View style={styles.container}>
-        <Text style={[styles.muted, { padding: 24 }]}>Solo el Super Admin puede ver la lista de usuarios.</Text>
+        <Text style={[styles.muted, { padding: 24 }]}>No tienes permiso para ver la lista de usuarios.</Text>
       </View>
     );
   }
@@ -107,6 +124,26 @@ export default function UsersScreen() {
             textColor={colors.brandDark}
             style={styles.field}
           />
+
+          {role === 'vendedor' && (
+            <>
+              <PlatformPicker
+                options={(supervisors ?? []).map((s: AppUser) => ({ value: s.id, label: s.name }))}
+                value={supervisorId}
+                onChange={setSupervisorId}
+                placeholder="Supervisor (opcional)"
+                textColor={colors.brandDark}
+                style={styles.field}
+              />
+              <TextInput
+                label="% Comisión (opcional)"
+                value={commissionPercent}
+                onChangeText={setCommissionPercent}
+                keyboardType="decimal-pad"
+                style={styles.field}
+              />
+            </>
+          )}
 
           {error && <HelperText type="error">{error}</HelperText>}
 

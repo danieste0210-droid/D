@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
+import { AwardStatus, SaleStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
@@ -13,6 +14,47 @@ export class ReportsService {
       where: { createdAt: { gte: from, lte: to } },
       _sum: { amount: true },
       _count: true,
+    });
+  }
+
+  // "Ventas Globales": total vendido, total en premios, neto a entregar (ventas - premios), y
+  // desglose de cuánto se jugó por cada número. Los premios se cuentan por fecha de sorteo
+  // (result.drawDate), las ventas por fecha de creación -- son rangos independientes a propósito.
+  async globalSales(from: Date, to: Date) {
+    const sales = await this.prisma.sale.findMany({
+      where: { createdAt: { gte: from, lte: to }, status: { not: SaleStatus.cancelled } },
+    });
+    const totalSales = sales.reduce((sum, s) => sum + Number(s.amount), 0);
+
+    const awards = await this.prisma.award.findMany({
+      where: { result: { drawDate: { gte: from, lte: to } }, status: { not: AwardStatus.reversed } },
+    });
+    const totalPrizes = awards.reduce((sum, a) => sum + Number(a.amount), 0);
+
+    const byNumber = new Map<string, { count: number; amount: number }>();
+    for (const sale of sales) {
+      const entry = byNumber.get(sale.numberPlayed) ?? { count: 0, amount: 0 };
+      entry.count += 1;
+      entry.amount += Number(sale.amount);
+      byNumber.set(sale.numberPlayed, entry);
+    }
+
+    return {
+      totalSales,
+      totalPrizes,
+      netAmount: totalSales - totalPrizes,
+      numbersBreakdown: Array.from(byNumber.entries())
+        .map(([number, v]) => ({ number, ...v }))
+        .sort((a, b) => b.amount - a.amount),
+    };
+  }
+
+  // "Eliminar Ventas": ventas canceladas en el rango, con quién y por qué (auditoría).
+  cancelledSales(from: Date, to: Date) {
+    return this.prisma.sale.findMany({
+      where: { status: SaleStatus.cancelled, cancelledAt: { gte: from, lte: to } },
+      include: { seller: true, lottery: true, cancelledBy: true },
+      orderBy: { cancelledAt: 'desc' },
     });
   }
 

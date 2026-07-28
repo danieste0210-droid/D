@@ -8,12 +8,19 @@ export interface Lottery {
   active: boolean;
   blocked: boolean;
   maxAmountPerNumber: string | null;
-  payoutMultiplier: string;
 }
 
 export interface CreateLotteryPayload {
   name: string;
   maxAmountPerNumber?: number;
+}
+
+export interface ProcessAwardsPayload {
+  lotteryId: string;
+  drawDate: string;
+  firstNumber: string;
+  secondNumber: string;
+  thirdNumber: string;
 }
 
 export function listLotteries(): Promise<Lottery[]> {
@@ -34,4 +41,8 @@ export function editLottery(id: string, payload: Partial<CreateLotteryPayload & 
 
 export function getLotteryResults(lotteryId: string): Promise<Result[]> {
   return apiFetch<Result[]>(`${endpoints.lotteries.results}?lotteryId=${lotteryId}`);
+}
+
+export function processAwards(payload: ProcessAwardsPayload): Promise<{ result: Result; awardsCreated: number }> {
+  return apiFetch(endpoints.lotteries.processAwards, { method: 'POST', body: JSON.stringify(payload) });
 }

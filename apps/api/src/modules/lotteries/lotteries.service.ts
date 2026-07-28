@@ -51,11 +51,15 @@ export class LotteriesService {
     return this.prisma.award.findMany({ where: { sale: { sellerId: userId } }, include: { sale: true } });
   }
 
-  // Registra el resultado del sorteo y marca como ganadoras (Award, status=pending) todas las
-  // ventas activas que coincidan con el número ganador. Todo o nada: si falla cualquier paso,
-  // no queda ni el Result ni los Awards a medio crear.
-  // TODO(awards): el multiplicador de pago (Lottery.payoutMultiplier) es un placeholder de
-  // negocio -- reemplazar por la tabla de pagos real (puede variar por tipo de jugada).
+  // Registra el resultado (quiniela: 3 posiciones ganadoras) y calcula premios para todas las
+  // ventas activas de esa lotería. Regla de coincidencia: un número jugado de N cifras gana
+  // contra una posición si coincide con las ÚLTIMAS N cifras de esa posición (String.slice(-N)
+  // ya maneja correctamente el caso donde el resultado tiene menos cifras que lo jugado -- nunca
+  // hay match en ese caso). Si coincide con varias posiciones, se pagan todas sumadas (varios
+  // Award por la misma venta, uno por posición).
+  // TODO(awards): si falta el multiplicador configurado para una combinación cifras/posición que
+  // sí tuvo ventas, esa combinación no genera premio (no debería pasar si se configuran los
+  // multiplicadores de la lotería antes de abrir ventas).
   async processAwards(dto: ProcessAwardsDto, processedById: string) {
     const lottery = await this.getOrThrow(dto.lotteryId);
     const drawDate = new Date(dto.drawDate);
@@ -65,48 +69,71 @@ export class LotteriesService {
     });
     if (existing) throw new ConflictException('Ya existe un resultado para esta lotería y fecha');
 
-    const { result, winningSales } = await this.prisma.$transaction(async (tx) => {
+    const multipliers = await this.prisma.payoutMultiplier.findMany({ where: { lotteryId: dto.lotteryId } });
+    const multiplierMap = new Map(multipliers.map((m) => [`${m.digitCount}-${m.position}`, Number(m.multiplier)]));
+    const winningNumbers = [dto.firstNumber, dto.secondNumber, dto.thirdNumber];
+
+    const { result, winnerSellerIds, awardsCreated } = await this.prisma.$transaction(async (tx) => {
       const createdResult = await tx.result.create({
         data: {
           lotteryId: dto.lotteryId,
           drawDate,
-          winningNumber: dto.winningNumber,
+          firstNumber: dto.firstNumber,
+          secondNumber: dto.secondNumber,
+          thirdNumber: dto.thirdNumber,
           processedById,
         },
       });
 
-      const sales = await tx.sale.findMany({
-        where: { lotteryId: dto.lotteryId, numberPlayed: dto.winningNumber, status: SaleStatus.active },
+      const activeSales = await tx.sale.findMany({
+        where: { lotteryId: dto.lotteryId, status: SaleStatus.active },
       });
 
-      for (const sale of sales) {
-        await tx.award.create({
-          data: {
-            saleId: sale.id,
-            resultId: createdResult.id,
-            amount: Number(sale.amount) * Number(lottery.payoutMultiplier),
-            status: AwardStatus.pending,
-          },
-        });
+      const sellerIds: string[] = [];
+      let count = 0;
+
+      for (const sale of activeSales) {
+        const digitCount = sale.numberPlayed.length;
+
+        for (let position = 1; position <= 3; position++) {
+          const winningNumber = winningNumbers[position - 1];
+          const matches = winningNumber.slice(-digitCount) === sale.numberPlayed;
+          if (!matches) continue;
+
+          const multiplier = multiplierMap.get(`${digitCount}-${position}`);
+          if (multiplier == null) continue;
+
+          await tx.award.create({
+            data: {
+              saleId: sale.id,
+              resultId: createdResult.id,
+              position,
+              amount: Number(sale.amount) * multiplier,
+              status: AwardStatus.pending,
+            },
+          });
+          sellerIds.push(sale.sellerId);
+          count += 1;
+        }
       }
 
-      return { result: createdResult, winningSales: sales };
+      return { result: createdResult, winnerSellerIds: sellerIds, awardsCreated: count };
     });
 
-    // Fuera de la transacción a propósito: un fallo al notificar no debe revertir los premios
-    // ya confirmados en la base. Un seller con varias ventas ganadoras recibe un solo push.
-    const uniqueSellerIds = [...new Set(winningSales.map((s) => s.sellerId))];
+    // Fuera de la transacción a propósito: un fallo al notificar no debe revertir premios ya
+    // confirmados. Un vendedor con varias ventas/posiciones ganadoras recibe un solo push.
+    const uniqueSellerIds = [...new Set(winnerSellerIds)];
     await Promise.all(
       uniqueSellerIds.map((sellerId) =>
         this.notifications.sendToUser(sellerId, {
           title: '¡Tienes un premio!',
-          body: `Resultado de ${lottery.name}: número ganador ${dto.winningNumber}`,
+          body: `Resultado de ${lottery.name} publicado`,
           data: { resultId: result.id, lotteryId: lottery.id },
         }),
       ),
     );
 
-    return { result, awardsCreated: winningSales.length };
+    return { result, awardsCreated };
   }
 
   private async getOrThrow(id: string) {

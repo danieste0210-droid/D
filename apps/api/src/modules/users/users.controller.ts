@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -34,9 +34,22 @@ export class UsersController {
     return this.usersService.deactivate(id);
   }
 
+  // Admin también administra usuarios en la app de referencia (no solo super).
   @Get('super')
-  @Roles(Role.super)
+  @Roles(Role.super, Role.admin)
   findAllActive() {
     return this.usersService.findAllActive();
+  }
+
+  @Get('supervisors')
+  @Roles(Role.super, Role.admin)
+  findSupervisors() {
+    return this.usersService.findSupervisors();
+  }
+
+  @Get('by-supervisor')
+  @Roles(Role.super, Role.admin)
+  findBySupervisor(@Query('supervisorId') supervisorId: string) {
+    return this.usersService.findVendorsBySupervisor(supervisorId);
   }
 }

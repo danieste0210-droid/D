@@ -13,6 +13,7 @@ export const endpoints = {
     summary: '/sale/sales/sumary',
     lastSale: '/sale/sales/ultsale',
     cancel: (id: string) => `/sale/sales/delete/${id}`,
+    adminCancel: (id: string) => `/sale/admin/delete/${id}`,
   },
   lotteries: {
     create: '/lotteries/create',
@@ -22,6 +23,7 @@ export const endpoints = {
     all: '/lotteries/all',
     day: '/lotteries/day',
     results: '/lotteries/results',
+    processAwards: '/lotteries/process/awards',
     awardsForUser: '/lotteries/awards/user',
   },
   closures: {
@@ -31,7 +33,6 @@ export const endpoints = {
     delete: (id: string) => `/closures/delete/${id}`,
   },
   results: {
-    create: '/results/create',
     reverse: (id: string) => `/results/reverse/${id}`,
     pendingAwards: '/results/awards/pending',
   },
@@ -40,10 +41,23 @@ export const endpoints = {
     update: (id: string) => `/user/update/${id}`,
     deactivate: (id: string) => `/user/delete/${id}`,
     all: '/user/super',
+    supervisors: '/user/supervisors',
+    bySupervisor: (supervisorId: string) => `/user/by-supervisor?supervisorId=${supervisorId}`,
   },
   reports: {
     sales: '/reports/sales',
+    globalSales: '/reports/global-sales',
+    cancelledSales: '/reports/cancelled-sales',
     exportExcel: '/reports/sales/export/excel',
     exportPdf: '/reports/sales/export/pdf',
+  },
+  payoutMultipliers: {
+    byLottery: (lotteryId: string) => `/payout-multipliers?lotteryId=${lotteryId}`,
+    upsert: '/payout-multipliers',
+  },
+  blockedNumbers: {
+    all: '/blocked-numbers',
+    create: '/blocked-numbers',
+    delete: (id: string) => `/blocked-numbers/${id}`,
   },
 } as const;

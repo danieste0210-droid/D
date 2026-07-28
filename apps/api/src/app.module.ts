@@ -19,6 +19,8 @@ import { SellModule } from './modules/sell/sell.module';
 import { TopsModule } from './modules/tops/tops.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { PayoutMultipliersModule } from './modules/payout-multipliers/payout-multipliers.module';
+import { BlockedNumbersModule } from './modules/blocked-numbers/blocked-numbers.module';
 
 @Module({
   imports: [
@@ -45,6 +47,8 @@ import { AuditModule } from './modules/audit/audit.module';
     SellModule,
     TopsModule,
     ReportsModule,
+    PayoutMultipliersModule,
+    BlockedNumbersModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
