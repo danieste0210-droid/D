@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -6,6 +6,7 @@ import { Audit } from '../../common/decorators/audit.decorator';
 import { CurrentUser, AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { CreateClosureDto } from './dto/create-closure.dto';
 import { UpdateClosureDto } from './dto/update-closure.dto';
+import { UpsertClosureDefaultDto } from './dto/upsert-closure-default.dto';
 import { ClosuresService } from './closures.service';
 
 @ApiTags('closures')
@@ -24,6 +25,19 @@ export class ClosuresController {
   @Roles(Role.super, Role.admin, Role.supervisor, Role.vendedor)
   findAll() {
     return this.closuresService.findAll();
+  }
+
+  // Horario general por día de la semana (plantilla/fallback) -- ver ClosuresService.isLotteryOpen.
+  @Get('defaults')
+  @Roles(Role.super, Role.admin, Role.supervisor, Role.vendedor)
+  findAllDefaults() {
+    return this.closuresService.findAllDefaults();
+  }
+
+  @Put('defaults')
+  @Audit({ action: 'closureDefault.upsert', entity: 'ClosureDefault' })
+  upsertDefault(@Body() dto: UpsertClosureDefaultDto) {
+    return this.closuresService.upsertDefault(dto);
   }
 
   @Patch('update/:id')

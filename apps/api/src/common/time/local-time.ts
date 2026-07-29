@@ -29,3 +29,11 @@ export function closeTimeToMinutes(closeTime: string): number {
   const [hour, minute] = closeTime.split(':').map(Number);
   return hour * 60 + minute;
 }
+
+// Modo "Día" (openTime null): abierto desde medianoche hasta closeTime.
+// Modo "Rango" (openTime definido): abierto solo entre openTime y closeTime.
+export function isWithinSchedule(minutesSinceMidnight: number, openTime: string | null, closeTime: string): boolean {
+  const closeMinutes = closeTimeToMinutes(closeTime);
+  if (!openTime) return minutesSinceMidnight < closeMinutes;
+  return minutesSinceMidnight >= closeTimeToMinutes(openTime) && minutesSinceMidnight < closeMinutes;
+}

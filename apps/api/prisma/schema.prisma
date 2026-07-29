@@ -196,12 +196,16 @@ model BlockedNumber {
   @@map("blocked_numbers")
 }
 
-// Horario de cierre por lotería y día de la semana. Timezone siempre America/Panama.
+// Horario de cierre por lotería y día de la semana (excepción al horario general de
+// ClosureDefault para ese día). Timezone siempre America/Panama.
 model Closure {
   id        String  @id @default(uuid())
   lotteryId String  @map("lottery_id")
   lottery   Lottery @relation(fields: [lotteryId], references: [id])
   dayOfWeek Int     @map("day_of_week") // 0 = domingo ... 6 = sábado
+  // Modo "Rango": si se define, la lotería solo vende entre openTime y closeTime. Modo "Día"
+  // (openTime null): vende desde medianoche hasta closeTime.
+  openTime  String? @map("open_time") // "HH:mm" en America/Panama
   closeTime String  @map("close_time") // "HH:mm" en America/Panama
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -209,6 +213,20 @@ model Closure {
 
   @@unique([lotteryId, dayOfWeek])
   @@map("closures")
+}
+
+// Horario general por día de la semana, aplicado a cualquier lotería que no tenga su propio
+// Closure para ese día (fallback/plantilla). Mismas reglas de openTime que Closure.
+model ClosureDefault {
+  id        String  @id @default(uuid())
+  dayOfWeek Int     @unique @map("day_of_week") // 0 = domingo ... 6 = sábado
+  openTime  String? @map("open_time")
+  closeTime String  @map("close_time")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("closure_defaults")
 }
 
 // Historial de cambios de horario (quién y cuándo modificó un cierre).

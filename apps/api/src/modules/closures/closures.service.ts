@@ -1,9 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
-import { closeTimeToMinutes, toLocalTimeParts } from '../../common/time/local-time';
+import { isWithinSchedule, toLocalTimeParts } from '../../common/time/local-time';
 import { CreateClosureDto } from './dto/create-closure.dto';
 import { UpdateClosureDto } from './dto/update-closure.dto';
+import { UpsertClosureDefaultDto } from './dto/upsert-closure-default.dto';
 
 @Injectable()
 export class ClosuresService {
@@ -54,6 +55,8 @@ export class ClosuresService {
 
   // Determina si una lotería está abierta a la venta en un instante dado, siempre en
   // America/Panama (o el TIMEZONE configurado), sin depender de la hora local del dispositivo.
+  // Prioridad: Closure específico de la lotería para ese día; si no existe, se usa el horario
+  // general (ClosureDefault) de ese día como respaldo.
   async isLotteryOpen(lotteryId: string, at: Date = new Date()): Promise<boolean> {
     const lottery = await this.prisma.lottery.findUnique({ where: { id: lotteryId } });
     if (!lottery || !lottery.active || lottery.blocked) return false;
@@ -62,9 +65,22 @@ export class ClosuresService {
     const closure = await this.prisma.closure.findUnique({
       where: { lotteryId_dayOfWeek: { lotteryId, dayOfWeek } },
     });
-    if (!closure) return false; // sin cierre configurado para ese día -> no se vende
+    const schedule = closure ?? (await this.prisma.closureDefault.findUnique({ where: { dayOfWeek } }));
+    if (!schedule) return false; // ni override ni horario general para ese día -> no se vende
 
-    return minutesSinceMidnight < closeTimeToMinutes(closure.closeTime);
+    return isWithinSchedule(minutesSinceMidnight, schedule.openTime, schedule.closeTime);
+  }
+
+  findAllDefaults() {
+    return this.prisma.closureDefault.findMany({ orderBy: { dayOfWeek: 'asc' } });
+  }
+
+  upsertDefault(dto: UpsertClosureDefaultDto) {
+    return this.prisma.closureDefault.upsert({
+      where: { dayOfWeek: dto.dayOfWeek },
+      update: { openTime: dto.openTime, closeTime: dto.closeTime },
+      create: dto,
+    });
   }
 
   private async getOrThrow(id: string) {

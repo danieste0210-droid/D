@@ -31,6 +31,8 @@ export const endpoints = {
     all: '/closures/getAll',
     update: (id: string) => `/closures/update/${id}`,
     delete: (id: string) => `/closures/delete/${id}`,
+    defaults: '/closures/defaults',
+    upsertDefault: '/closures/defaults',
   },
   results: {
     reverse: (id: string) => `/results/reverse/${id}`,

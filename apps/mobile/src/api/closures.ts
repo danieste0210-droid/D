@@ -6,6 +6,7 @@ export interface Closure {
   id: string;
   lotteryId: string;
   dayOfWeek: number;
+  openTime: string | null;
   closeTime: string;
   lottery?: Lottery;
 }
@@ -13,6 +14,20 @@ export interface Closure {
 export interface CreateClosurePayload {
   lotteryId: string;
   dayOfWeek: number;
+  openTime?: string;
+  closeTime: string;
+}
+
+export interface ClosureDefault {
+  id: string;
+  dayOfWeek: number;
+  openTime: string | null;
+  closeTime: string;
+}
+
+export interface UpsertClosureDefaultPayload {
+  dayOfWeek: number;
+  openTime?: string;
   closeTime: string;
 }
 
@@ -30,4 +45,12 @@ export function deleteClosure(id: string): Promise<Closure> {
 
 export function updateClosure(id: string, payload: Partial<CreateClosurePayload>): Promise<Closure> {
   return apiFetch<Closure>(endpoints.closures.update(id), { method: 'PATCH', body: JSON.stringify(payload) });
+}
+
+export function listClosureDefaults(): Promise<ClosureDefault[]> {
+  return apiFetch<ClosureDefault[]>(endpoints.closures.defaults);
+}
+
+export function upsertClosureDefault(payload: UpsertClosureDefaultPayload): Promise<ClosureDefault> {
+  return apiFetch<ClosureDefault>(endpoints.closures.upsertDefault, { method: 'PUT', body: JSON.stringify(payload) });
 }
