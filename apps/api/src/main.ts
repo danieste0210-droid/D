@@ -20,7 +20,9 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, document);
 
   const port = process.env.PORT ?? 3000;
-  await app.listen(port);
+  // Bind explícito a 0.0.0.0: en Windows, listen(port) sin host puede quedar solo en loopback,
+  // inalcanzable desde otros dispositivos de la red (ej. el celular probando con Expo Go).
+  await app.listen(port, '0.0.0.0');
   // eslint-disable-next-line no-console
   console.log(`CloverApp API escuchando en http://localhost:${port} (docs en /docs)`);
 }

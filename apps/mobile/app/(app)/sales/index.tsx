@@ -12,11 +12,20 @@ const STATUS_LABEL: Record<Sale['status'], string> = {
   paid: 'Pagada',
 };
 
+const BET_TYPE_LABEL: Record<Sale['betType'], string> = {
+  recto: 'Recto',
+  combinado: 'Combinado',
+  palet: 'Palet',
+};
+
 function SaleRow({ sale, onCancel }: { sale: Sale; onCancel: (sale: Sale) => void }) {
   return (
     <View style={styles.row}>
       <View style={{ flex: 1 }}>
-        <Text variant="titleMedium">#{sale.numberPlayed}</Text>
+        <Text variant="titleMedium">
+          #{sale.numberPlayed}
+          {sale.betType !== 'recto' ? ` · ${BET_TYPE_LABEL[sale.betType]}` : ''}
+        </Text>
         <Text variant="bodySmall" style={styles.muted}>
           {new Date(sale.createdAt).toLocaleString('es-PA')}
         </Text>

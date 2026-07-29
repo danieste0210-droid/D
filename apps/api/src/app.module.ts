@@ -19,6 +19,8 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { PayoutMultipliersModule } from './modules/payout-multipliers/payout-multipliers.module';
 import { BlockedNumbersModule } from './modules/blocked-numbers/blocked-numbers.module';
+import { CombinadoMultipliersModule } from './modules/combinado-multipliers/combinado-multipliers.module';
+import { PaletMultipliersModule } from './modules/palet-multipliers/palet-multipliers.module';
 
 @Module({
   imports: [
@@ -45,6 +47,8 @@ import { BlockedNumbersModule } from './modules/blocked-numbers/blocked-numbers.
     ReportsModule,
     PayoutMultipliersModule,
     BlockedNumbersModule,
+    CombinadoMultipliersModule,
+    PaletMultipliersModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

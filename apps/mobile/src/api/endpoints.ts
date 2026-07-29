@@ -55,6 +55,14 @@ export const endpoints = {
     byLottery: (lotteryId: string) => `/payout-multipliers?lotteryId=${lotteryId}`,
     upsert: '/payout-multipliers',
   },
+  combinadoMultipliers: {
+    byLottery: (lotteryId: string) => `/combinado-multipliers?lotteryId=${lotteryId}`,
+    upsert: '/combinado-multipliers',
+  },
+  paletMultipliers: {
+    byLottery: (lotteryId: string) => `/palet-multipliers?lotteryId=${lotteryId}`,
+    upsert: '/palet-multipliers',
+  },
   blockedNumbers: {
     all: '/blocked-numbers',
     create: '/blocked-numbers',

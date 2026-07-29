@@ -1,10 +1,17 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { SaleStatus } from '@prisma/client';
+import { BetType, SaleStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ClosuresService } from '../closures/closures.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { SearchSaleDto } from './dto/search-sale.dto';
+
+// Cantidad de cifras esperada según el tipo de apuesta -- ver enum BetType en schema.prisma.
+const VALID_DIGIT_COUNTS: Record<BetType, number[]> = {
+  [BetType.recto]: [2, 3, 4],
+  [BetType.combinado]: [3, 4],
+  [BetType.palet]: [2],
+};
 
 // TODO(sales): impresión de ticket (QR/código de verificación) vía react-native-ble-plx en mobile.
 @Injectable()
@@ -15,6 +22,14 @@ export class SalesService {
   ) {}
 
   async create(sellerId: string, dto: CreateSaleDto) {
+    const betType = dto.betType ?? BetType.recto;
+    const validDigitCounts = VALID_DIGIT_COUNTS[betType];
+    if (!validDigitCounts.includes(dto.numberPlayed.length)) {
+      throw new BadRequestException(
+        `Para ${betType} se esperan ${validDigitCounts.join(' o ')} cifras, se recibieron ${dto.numberPlayed.length}`,
+      );
+    }
+
     const lottery = await this.prisma.lottery.findUnique({ where: { id: dto.lotteryId } });
     if (!lottery || !lottery.active || lottery.blocked) {
       throw new BadRequestException('Lotería no disponible');
@@ -49,6 +64,7 @@ export class SalesService {
         lotteryId: dto.lotteryId,
         numberPlayed: dto.numberPlayed,
         amount: dto.amount,
+        betType,
         ticketCode: randomUUID(),
         status: SaleStatus.active,
       },

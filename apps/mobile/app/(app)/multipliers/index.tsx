@@ -4,48 +4,109 @@ import { ActivityIndicator, Button, Snackbar, Text, TextInput } from 'react-nati
 import { colors } from '@/theme/colors';
 import { useLotteries } from '@/features/lotteries/hooks';
 import { usePayoutMultipliers, useUpsertPayoutMultiplier } from '@/features/payoutMultipliers/hooks';
+import { useCombinadoMultipliers, useUpsertCombinadoMultiplier } from '@/features/combinadoMultipliers/hooks';
+import { usePaletMultipliers, useUpsertPaletMultiplier } from '@/features/paletMultipliers/hooks';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import type { Lottery } from '@/api/lotteries';
+import type { PaletTier } from '@/api/paletMultipliers';
 
 const DIGIT_COUNTS = [2, 3, 4] as const;
 const POSITIONS = [1, 2, 3] as const;
 const POSITION_LABELS: Record<number, string> = { 1: '1ra', 2: '2da', 3: '3ra' };
+const COMBINADO_DIGIT_COUNTS = [3, 4] as const;
+const PALET_TIERS: PaletTier[] = ['mayor', 'menor'];
+const PALET_TIER_LABELS: Record<PaletTier, string> = { mayor: 'Premio mayor (1ra con 2da)', menor: 'Premio menor (2da con 3ra)' };
 
-function cellKey(digitCount: number, position: number) {
-  return `${digitCount}-${position}`;
+function rectoKey(digitCount: number, position: number, matchType: 'ultimas' | 'primeras') {
+  return `${digitCount}-${position}-${matchType}`;
 }
 
-// Pantalla "Multiplicadores": tabla cifras x posición, cada celda guarda su propio valor de
-// forma independiente (como en la app de referencia) en vez de un formulario único.
+// Pantalla "Multiplicadores": cada celda guarda su propio valor de forma independiente (como en
+// la app de referencia), agrupadas en Billete (recto), bono de primeras cifras, Combinado y Palet.
 export default function MultipliersScreen() {
   const { data: lotteries } = useLotteries();
   const [lotteryId, setLotteryId] = useState<string | null>(null);
-  const { data: multipliers, isLoading } = usePayoutMultipliers(lotteryId);
-  const upsert = useUpsertPayoutMultiplier();
+  const { data: rectoMultipliers, isLoading: loadingRecto } = usePayoutMultipliers(lotteryId);
+  const { data: combinadoMultipliers, isLoading: loadingCombinado } = useCombinadoMultipliers(lotteryId);
+  const { data: paletMultipliers, isLoading: loadingPalet } = usePaletMultipliers(lotteryId);
+  const upsertRecto = useUpsertPayoutMultiplier();
+  const upsertCombinado = useUpsertCombinadoMultiplier();
+  const upsertPalet = useUpsertPaletMultiplier();
+  const isLoading = loadingRecto || loadingCombinado || loadingPalet;
 
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [rectoValues, setRectoValues] = useState<Record<string, string>>({});
+  const [combinadoValues, setCombinadoValues] = useState<Record<number, string>>({});
+  const [paletValues, setPaletValues] = useState<Record<string, string>>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<string | null>(null);
 
   useEffect(() => {
     const next: Record<string, string> = {};
-    for (const m of multipliers ?? []) {
-      next[cellKey(m.digitCount, m.position)] = m.multiplier;
+    for (const m of rectoMultipliers ?? []) {
+      next[rectoKey(m.digitCount, m.position, m.matchType)] = m.multiplier;
     }
-    setValues(next);
-  }, [multipliers]);
+    setRectoValues(next);
+  }, [rectoMultipliers]);
 
-  const handleSave = async (digitCount: number, position: number) => {
+  useEffect(() => {
+    const next: Record<number, string> = {};
+    for (const m of combinadoMultipliers ?? []) next[m.digitCount] = m.multiplier;
+    setCombinadoValues(next);
+  }, [combinadoMultipliers]);
+
+  useEffect(() => {
+    const next: Record<string, string> = {};
+    for (const m of paletMultipliers ?? []) next[m.tier] = m.multiplier;
+    setPaletValues(next);
+  }, [paletMultipliers]);
+
+  const handleSaveRecto = async (digitCount: number, position: number, matchType: 'ultimas' | 'primeras') => {
     if (!lotteryId) return;
-    const key = cellKey(digitCount, position);
-    const raw = values[key];
+    const key = rectoKey(digitCount, position, matchType);
+    const raw = rectoValues[key];
     const multiplier = raw ? parseFloat(raw.replace(',', '.')) : NaN;
     if (!raw || Number.isNaN(multiplier) || multiplier <= 0) return;
 
     setSavingKey(key);
     try {
-      await upsert.mutateAsync({ lotteryId, digitCount, position, multiplier });
+      await upsertRecto.mutateAsync({ lotteryId, digitCount, position, matchType, multiplier });
       setSnackbar(`Guardado: ${digitCount} cifras · ${POSITION_LABELS[position]} = ${multiplier}x`);
+    } catch {
+      setSnackbar('No se pudo guardar el multiplicador');
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  const handleSaveCombinado = async (digitCount: number) => {
+    if (!lotteryId) return;
+    const key = `combinado-${digitCount}`;
+    const raw = combinadoValues[digitCount];
+    const multiplier = raw ? parseFloat(raw.replace(',', '.')) : NaN;
+    if (!raw || Number.isNaN(multiplier) || multiplier <= 0) return;
+
+    setSavingKey(key);
+    try {
+      await upsertCombinado.mutateAsync({ lotteryId, digitCount, multiplier });
+      setSnackbar(`Guardado: Combinado ${digitCount} cifras = ${multiplier}x`);
+    } catch {
+      setSnackbar('No se pudo guardar el multiplicador');
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  const handleSavePalet = async (tier: PaletTier) => {
+    if (!lotteryId) return;
+    const key = `palet-${tier}`;
+    const raw = paletValues[tier];
+    const multiplier = raw ? parseFloat(raw.replace(',', '.')) : NaN;
+    if (!raw || Number.isNaN(multiplier) || multiplier <= 0) return;
+
+    setSavingKey(key);
+    try {
+      await upsertPalet.mutateAsync({ lotteryId, tier, multiplier });
+      setSnackbar(`Guardado: Palet ${PALET_TIER_LABELS[tier]} = ${multiplier}x`);
     } catch {
       setSnackbar('No se pudo guardar el multiplicador');
     } finally {
@@ -73,21 +134,55 @@ export default function MultipliersScreen() {
 
         {lotteryId && isLoading && <ActivityIndicator color={colors.brand} style={{ marginTop: 16 }} />}
 
-        {lotteryId &&
-          !isLoading &&
-          DIGIT_COUNTS.map((digitCount) => (
-            <View key={digitCount} style={styles.digitGroup}>
-              <Text variant="titleSmall" style={styles.groupTitle}>
-                {digitCount} cifras
-              </Text>
+        {lotteryId && !isLoading && (
+          <>
+            <Text variant="titleSmall" style={styles.sectionTitle}>
+              Billete (recto)
+            </Text>
+            {DIGIT_COUNTS.map((digitCount) => (
+              <View key={digitCount} style={styles.digitGroup}>
+                <Text variant="titleSmall" style={styles.groupTitle}>
+                  {digitCount} cifras
+                </Text>
+                {POSITIONS.map((position) => {
+                  const key = rectoKey(digitCount, position, 'ultimas');
+                  return (
+                    <View key={key} style={styles.cellRow}>
+                      <Text style={styles.cellLabel}>{POSITION_LABELS[position]}</Text>
+                      <TextInput
+                        value={rectoValues[key] ?? ''}
+                        onChangeText={(v) => setRectoValues((prev) => ({ ...prev, [key]: v }))}
+                        keyboardType="decimal-pad"
+                        dense
+                        style={styles.cellInput}
+                      />
+                      <Button
+                        compact
+                        mode="contained"
+                        onPress={() => handleSaveRecto(digitCount, position, 'ultimas')}
+                        loading={savingKey === key}
+                        buttonColor={colors.brand}
+                      >
+                        Guardar
+                      </Button>
+                    </View>
+                  );
+                })}
+              </View>
+            ))}
+
+            <Text variant="titleSmall" style={styles.sectionTitle}>
+              Bono: primeras 3 cifras (solo billetes de 4 cifras)
+            </Text>
+            <View style={styles.digitGroup}>
               {POSITIONS.map((position) => {
-                const key = cellKey(digitCount, position);
+                const key = rectoKey(4, position, 'primeras');
                 return (
                   <View key={key} style={styles.cellRow}>
                     <Text style={styles.cellLabel}>{POSITION_LABELS[position]}</Text>
                     <TextInput
-                      value={values[key] ?? ''}
-                      onChangeText={(v) => setValues((prev) => ({ ...prev, [key]: v }))}
+                      value={rectoValues[key] ?? ''}
+                      onChangeText={(v) => setRectoValues((prev) => ({ ...prev, [key]: v }))}
                       keyboardType="decimal-pad"
                       dense
                       style={styles.cellInput}
@@ -95,7 +190,7 @@ export default function MultipliersScreen() {
                     <Button
                       compact
                       mode="contained"
-                      onPress={() => handleSave(digitCount, position)}
+                      onPress={() => handleSaveRecto(4, position, 'primeras')}
                       loading={savingKey === key}
                       buttonColor={colors.brand}
                     >
@@ -105,7 +200,68 @@ export default function MultipliersScreen() {
                 );
               })}
             </View>
-          ))}
+
+            <Text variant="titleSmall" style={styles.sectionTitle}>
+              Combinado
+            </Text>
+            <View style={styles.digitGroup}>
+              {COMBINADO_DIGIT_COUNTS.map((digitCount) => {
+                const key = `combinado-${digitCount}`;
+                return (
+                  <View key={key} style={styles.cellRow}>
+                    <Text style={styles.cellLabel}>{digitCount} cifras</Text>
+                    <TextInput
+                      value={combinadoValues[digitCount] ?? ''}
+                      onChangeText={(v) => setCombinadoValues((prev) => ({ ...prev, [digitCount]: v }))}
+                      keyboardType="decimal-pad"
+                      dense
+                      style={styles.cellInput}
+                    />
+                    <Button
+                      compact
+                      mode="contained"
+                      onPress={() => handleSaveCombinado(digitCount)}
+                      loading={savingKey === key}
+                      buttonColor={colors.brand}
+                    >
+                      Guardar
+                    </Button>
+                  </View>
+                );
+              })}
+            </View>
+
+            <Text variant="titleSmall" style={styles.sectionTitle}>
+              Palet
+            </Text>
+            <View style={styles.digitGroup}>
+              {PALET_TIERS.map((tier) => {
+                const key = `palet-${tier}`;
+                return (
+                  <View key={key} style={styles.cellRow}>
+                    <Text style={[styles.cellLabel, { width: 170 }]}>{PALET_TIER_LABELS[tier]}</Text>
+                    <TextInput
+                      value={paletValues[tier] ?? ''}
+                      onChangeText={(v) => setPaletValues((prev) => ({ ...prev, [tier]: v }))}
+                      keyboardType="decimal-pad"
+                      dense
+                      style={styles.cellInput}
+                    />
+                    <Button
+                      compact
+                      mode="contained"
+                      onPress={() => handleSavePalet(tier)}
+                      loading={savingKey === key}
+                      buttonColor={colors.brand}
+                    >
+                      Guardar
+                    </Button>
+                  </View>
+                );
+              })}
+            </View>
+          </>
+        )}
       </View>
 
       <Snackbar visible={!!snackbar} onDismiss={() => setSnackbar(null)} duration={3000}>
@@ -120,6 +276,7 @@ const styles = StyleSheet.create({
   form: { padding: 20, backgroundColor: colors.surface },
   field: { marginBottom: 12 },
   muted: { color: colors.textMuted },
+  sectionTitle: { marginTop: 24, color: colors.brand, fontWeight: '700' },
   digitGroup: { marginTop: 16 },
   groupTitle: { marginBottom: 8, color: colors.brandDark },
   cellRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 },

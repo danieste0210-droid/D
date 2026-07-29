@@ -9,11 +9,25 @@ import { useLotteries } from '@/features/lotteries/hooks';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import type { Lottery } from '@/api/lotteries';
 import { useCreateSale } from '@/features/sales/hooks';
-import { ApiError, type Sale } from '@/api/sales';
+import { ApiError, type BetType, type Sale } from '@/api/sales';
 import { enqueueSale } from '@/offline/queue';
 import { usePrinterStore } from '@/printing/printerStore';
 import { printTicket } from '@/printing/blePrinter';
 import { buildSaleTicket } from '@/printing/escpos';
+
+const BET_TYPE_LABELS: Record<BetType, string> = {
+  recto: 'Recto',
+  combinado: 'Combinado',
+  palet: 'Palet',
+};
+
+// Cantidad de cifras válida según el tipo de apuesta -- debe coincidir con
+// VALID_DIGIT_COUNTS en apps/api/src/modules/sales/sales.service.ts.
+const VALID_DIGIT_COUNTS: Record<BetType, number[]> = {
+  recto: [2, 3, 4],
+  combinado: [3, 4],
+  palet: [2],
+};
 
 export default function NewSaleScreen() {
   const { data: lotteries } = useLotteries();
@@ -22,6 +36,7 @@ export default function NewSaleScreen() {
   const printerDeviceId = usePrinterStore((s) => s.deviceId);
 
   const [lotteryId, setLotteryId] = useState<string | null>(null);
+  const [betType, setBetType] = useState<BetType>('recto');
   const [numberPlayed, setNumberPlayed] = useState('');
   const [amount, setAmount] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +44,8 @@ export default function NewSaleScreen() {
 
   const selectedLottery = lotteries?.find((l: Lottery) => l.id === lotteryId);
   const amountValue = parseFloat(amount.replace(',', '.'));
-  const isValid = !!lotteryId && numberPlayed.trim().length > 0 && amountValue > 0;
+  const validDigitCounts = VALID_DIGIT_COUNTS[betType];
+  const isValid = !!lotteryId && validDigitCounts.includes(numberPlayed.trim().length) && amountValue > 0;
 
   // Best-effort: la impresión nunca debe bloquear ni fallar el flujo de venta. Se dispara sin
   // esperar (fire-and-forget) para que una impresora lenta/desconectada no trabe la navegación.
@@ -53,7 +69,7 @@ export default function NewSaleScreen() {
     if (!isValid || !lotteryId) return;
     setError(null);
 
-    const payload = { lotteryId, numberPlayed: numberPlayed.trim(), amount: amountValue };
+    const payload = { lotteryId, numberPlayed: numberPlayed.trim(), amount: amountValue, betType };
 
     try {
       const sale = await createSale.mutateAsync(payload);
@@ -85,8 +101,20 @@ export default function NewSaleScreen() {
         style={styles.field}
       />
 
+      <PlatformPicker
+        options={(Object.keys(BET_TYPE_LABELS) as BetType[]).map((t) => ({ value: t, label: BET_TYPE_LABELS[t] }))}
+        value={betType}
+        onChange={(value) => {
+          setBetType(value);
+          setNumberPlayed('');
+        }}
+        placeholder="Tipo de apuesta"
+        textColor={colors.brandDark}
+        style={styles.field}
+      />
+
       <TextInput
-        label="Número jugado"
+        label={`Número jugado (${validDigitCounts.join(' o ')} cifras)`}
         value={numberPlayed}
         onChangeText={setNumberPlayed}
         keyboardType="number-pad"

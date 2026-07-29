@@ -14,7 +14,7 @@ async function drainQueue(onSaleSynced: () => void) {
     const queue = await getQueue();
     for (const item of queue) {
       try {
-        await createSale({ lotteryId: item.lotteryId, numberPlayed: item.numberPlayed, amount: item.amount });
+        await createSale({ lotteryId: item.lotteryId, numberPlayed: item.numberPlayed, amount: item.amount, betType: item.betType });
         await removeFromQueue(item.id);
         onSaleSynced();
       } catch (err) {

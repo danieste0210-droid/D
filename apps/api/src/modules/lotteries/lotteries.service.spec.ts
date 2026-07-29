@@ -11,20 +11,31 @@ jest.mock('../notifications/notifications.service', () => ({
 import { LotteriesService } from './lotteries.service';
 
 const DEFAULT_MULTIPLIERS = [
-  { digitCount: 2, position: 1, multiplier: 60 },
-  { digitCount: 2, position: 2, multiplier: 20 },
-  { digitCount: 2, position: 3, multiplier: 10 },
-  { digitCount: 3, position: 1, multiplier: 400 },
-  { digitCount: 4, position: 1, multiplier: 2200 },
-  { digitCount: 4, position: 2, multiplier: 650 },
-  { digitCount: 4, position: 3, multiplier: 320 },
+  { digitCount: 2, position: 1, matchType: 'ultimas', multiplier: 60 },
+  { digitCount: 2, position: 2, matchType: 'ultimas', multiplier: 20 },
+  { digitCount: 2, position: 3, matchType: 'ultimas', multiplier: 10 },
+  { digitCount: 3, position: 1, matchType: 'ultimas', multiplier: 400 },
+  { digitCount: 4, position: 1, matchType: 'ultimas', multiplier: 2200 },
+  { digitCount: 4, position: 2, matchType: 'ultimas', multiplier: 650 },
+  { digitCount: 4, position: 3, matchType: 'ultimas', multiplier: 320 },
 ];
 
-function buildService(overrides: { lottery?: any; result?: any; sales?: any[]; multipliers?: any[] } = {}) {
+function buildService(
+  overrides: {
+    lottery?: any;
+    result?: any;
+    sales?: any[];
+    multipliers?: any[];
+    combinadoMultipliers?: any[];
+    paletMultipliers?: any[];
+  } = {},
+) {
   const lottery = overrides.lottery ?? { id: 'lottery-1', name: 'Chance Demo' };
   const existingResult = overrides.result ?? null;
   const sales = overrides.sales ?? [];
   const multipliers = overrides.multipliers ?? DEFAULT_MULTIPLIERS;
+  const combinadoMultipliers = overrides.combinadoMultipliers ?? [];
+  const paletMultipliers = overrides.paletMultipliers ?? [];
 
   const txAwardCreate = jest.fn().mockResolvedValue(undefined);
   const txResultCreate = jest.fn().mockResolvedValue({ id: 'result-1' });
@@ -40,6 +51,8 @@ function buildService(overrides: { lottery?: any; result?: any; sales?: any[]; m
     lottery: { findUnique: jest.fn().mockResolvedValue(lottery) },
     result: { findUnique: jest.fn().mockResolvedValue(existingResult) },
     payoutMultiplier: { findMany: jest.fn().mockResolvedValue(multipliers) },
+    combinadoMultiplier: { findMany: jest.fn().mockResolvedValue(combinadoMultipliers) },
+    paletMultiplier: { findMany: jest.fn().mockResolvedValue(paletMultipliers) },
     $transaction: jest.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
   };
 
@@ -69,7 +82,7 @@ describe('LotteriesService.processAwards', () => {
 
   it('gana si el número jugado coincide exacto con una posición (mismas cifras)', async () => {
     const { service, tx } = buildService({
-      sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 10, numberPlayed: '1234' }],
+      sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 10, numberPlayed: '1234', betType: 'recto' }],
     });
 
     const result = await service.processAwards(dto, 'user-1');
@@ -89,7 +102,7 @@ describe('LotteriesService.processAwards', () => {
   it('un número jugado de 2 cifras gana si coincide con las ÚLTIMAS 2 cifras del ganador', async () => {
     const { service, tx } = buildService({
       // firstNumber = "1234" -> últimas 2 cifras = "34"
-      sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '34' }],
+      sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '34', betType: 'recto' }],
     });
 
     const result = await service.processAwards(dto, 'user-1');
@@ -100,11 +113,11 @@ describe('LotteriesService.processAwards', () => {
     });
   });
 
-  it('NO gana si coincide con las PRIMERAS cifras en vez de las últimas', async () => {
+  it('NO gana si coincide con las PRIMERAS cifras en vez de las últimas (sin bono configurado)', async () => {
     const { service, tx } = buildService({
       // firstNumber = "1234" -> primeras 2 cifras "12" (no cuenta, solo las últimas cuentan).
       // secondNumber/thirdNumber elegidos para que ninguno termine en "12" por accidente.
-      sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '12' }],
+      sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '12', betType: 'recto' }],
     });
     const noCollisionDto = { ...dto, secondNumber: '5678', thirdNumber: '9099' };
 
@@ -118,7 +131,7 @@ describe('LotteriesService.processAwards', () => {
     const { service, tx } = buildService({
       lottery: { id: 'lottery-1', name: 'Chance Demo' },
       result: null,
-      sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '1234' }],
+      sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '1234', betType: 'recto' }],
     });
     // resultado con posiciones de 1 sola cifra
     const shortDto = { ...dto, firstNumber: '4', secondNumber: '8', thirdNumber: '2' };
@@ -131,7 +144,7 @@ describe('LotteriesService.processAwards', () => {
 
   it('no crea award si no coincide con ninguna posición', async () => {
     const { service, tx } = buildService({
-      sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '99' }],
+      sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '99', betType: 'recto' }],
     });
 
     const result = await service.processAwards(dto, 'user-1');
@@ -144,7 +157,7 @@ describe('LotteriesService.processAwards', () => {
     // firstNumber "1234" y secondNumber "9934" ambos terminan en "34"
     const dtoMulti = { ...dto, secondNumber: '9934' };
     const { service, tx } = buildService({
-      sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '34' }],
+      sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '34', betType: 'recto' }],
     });
 
     const result = await service.processAwards(dtoMulti, 'user-1');
@@ -157,7 +170,7 @@ describe('LotteriesService.processAwards', () => {
   it('no crea award si falta el multiplicador configurado para esa combinación cifras/posición', async () => {
     const { service, tx } = buildService({
       multipliers: [], // ninguna combinación configurada
-      sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '1234' }],
+      sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '1234', betType: 'recto' }],
     });
 
     const result = await service.processAwards(dto, 'user-1');
@@ -180,9 +193,9 @@ describe('LotteriesService.processAwards', () => {
     const dtoMulti = { ...dto, secondNumber: '9934' };
     const { service, notifications } = buildService({
       sales: [
-        { id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '34' }, // gana pos 1 y 2
-        { id: 'sale-2', sellerId: 'seller-1', amount: 3, numberPlayed: '1234' }, // gana pos 1 también
-        { id: 'sale-3', sellerId: 'seller-2', amount: 1, numberPlayed: '00' }, // no gana
+        { id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '34', betType: 'recto' }, // gana pos 1 y 2
+        { id: 'sale-2', sellerId: 'seller-1', amount: 3, numberPlayed: '1234', betType: 'recto' }, // gana pos 1 también
+        { id: 'sale-3', sellerId: 'seller-2', amount: 1, numberPlayed: '00', betType: 'recto' }, // no gana
       ],
     });
 
@@ -190,5 +203,153 @@ describe('LotteriesService.processAwards', () => {
 
     expect(notifications.sendToUser).toHaveBeenCalledTimes(1);
     expect(notifications.sendToUser).toHaveBeenCalledWith('seller-1', expect.any(Object));
+  });
+
+  describe('bono "primeras 3 cifras" (billetes de 4 cifras completas)', () => {
+    const multipliersConPrimeras = [
+      ...DEFAULT_MULTIPLIERS,
+      { digitCount: 4, position: 1, matchType: 'primeras', multiplier: 50 },
+    ];
+
+    it('gana el bono si coinciden las primeras 3 cifras aunque no coincidan las últimas 3', async () => {
+      // firstNumber "1234" -> primeras 3 = "123". numberPlayed "1239" comparte "123" pero no
+      // las últimas cifras (termina en "239", no "234").
+      const { service, tx } = buildService({
+        multipliers: multipliersConPrimeras,
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '1239', betType: 'recto' }],
+      });
+
+      const result = await service.processAwards(dto, 'user-1');
+
+      expect(result.awardsCreated).toBe(1);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({ position: 1, amount: 5 * 50 }),
+      });
+    });
+
+    it('un ticket ganador exacto puede cobrar últimas Y primeras a la vez (dos awards)', async () => {
+      // numberPlayed "1234" coincide exacto: gana últimas-4 (2200x) y también primeras-3 (50x).
+      const { service, tx } = buildService({
+        multipliers: multipliersConPrimeras,
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '1234', betType: 'recto' }],
+      });
+
+      const result = await service.processAwards(dto, 'user-1');
+
+      expect(result.awardsCreated).toBe(2);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ position: 1, amount: 5 * 2200 }) });
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ position: 1, amount: 5 * 50 }) });
+    });
+
+    it('el bono de primeras cifras NO aplica a jugadas de 2 o 3 cifras', async () => {
+      // numberPlayed de 3 cifras "123" comparte las "primeras 3" del ganador, pero al no ser un
+      // billete de 4 cifras completas no debe activar el bono (solo compara vs. digitCount=3).
+      const { service, tx } = buildService({
+        multipliers: multipliersConPrimeras,
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '123', betType: 'recto' }],
+      });
+      // firstNumber "1234" -> últimas 3 = "234", no coincide con "123"; tampoco hay multiplicador
+      // "ultimas" 3-cifras que dé match, así que no debe generar ningún award.
+      const result = await service.processAwards(dto, 'user-1');
+
+      expect(result.awardsCreated).toBe(0);
+      expect(tx.txAwardCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('apuesta Combinado', () => {
+    it('gana si alguna permutación de las cifras jugadas coincide con el 1er premio', async () => {
+      // firstNumber "1234" -> últimas 3 cifras "234". numberPlayed "423" es permutación de "234".
+      const { service, tx } = buildService({
+        combinadoMultipliers: [{ digitCount: 3, multiplier: 100 }],
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 2, numberPlayed: '423', betType: 'combinado' }],
+      });
+
+      const result = await service.processAwards(dto, 'user-1');
+
+      expect(result.awardsCreated).toBe(1);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({ position: 1, amount: 2 * 100 }),
+      });
+    });
+
+    it('NO gana si la permutación coincide con el 2do o 3er premio (solo cuenta el 1ro)', async () => {
+      // secondNumber "5678" -> últimas 3 "678". numberPlayed "867" es permutación de "678", pero
+      // el combinado solo paga contra el 1er premio.
+      const { service, tx } = buildService({
+        combinadoMultipliers: [{ digitCount: 3, multiplier: 100 }],
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 2, numberPlayed: '867', betType: 'combinado' }],
+      });
+
+      const result = await service.processAwards(dto, 'user-1');
+
+      expect(result.awardsCreated).toBe(0);
+      expect(tx.txAwardCreate).not.toHaveBeenCalled();
+    });
+
+    it('no gana si no falta el multiplicador de Combinado para esa cantidad de cifras', async () => {
+      const { service, tx } = buildService({
+        combinadoMultipliers: [], // sin configurar
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 2, numberPlayed: '423', betType: 'combinado' }],
+      });
+
+      const result = await service.processAwards(dto, 'user-1');
+
+      expect(result.awardsCreated).toBe(0);
+      expect(tx.txAwardCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('apuesta Palet', () => {
+    const paletMultipliers = [
+      { tier: 'mayor', multiplier: 1000 },
+      { tier: 'menor', multiplier: 200 },
+    ];
+
+    it('gana premio mayor si coincide con 1er Y 2do premio a la vez', async () => {
+      // firstNumber "1234" -> últimas 2 "34". secondNumber "5678" -> últimas 2 "78". No coinciden
+      // entre sí, así que se ajusta el dto para que compartan las mismas últimas 2 cifras.
+      const paletDto = { ...dto, secondNumber: '9934' }; // últimas 2 de 2do premio = "34" también
+      const { service, tx } = buildService({
+        paletMultipliers,
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 3, numberPlayed: '34', betType: 'palet' }],
+      });
+
+      const result = await service.processAwards(paletDto, 'user-1');
+
+      expect(result.awardsCreated).toBe(1);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({ position: 1, amount: 3 * 1000 }),
+      });
+    });
+
+    it('gana premio menor si coincide con 2do Y 3er premio a la vez (no con el 1ro)', async () => {
+      // secondNumber "5678" -> "78". thirdNumber ajustado para terminar también en "78".
+      const paletDto = { ...dto, thirdNumber: '9978' };
+      const { service, tx } = buildService({
+        paletMultipliers,
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 3, numberPlayed: '78', betType: 'palet' }],
+      });
+
+      const result = await service.processAwards(paletDto, 'user-1');
+
+      expect(result.awardsCreated).toBe(1);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({ position: 2, amount: 3 * 200 }),
+      });
+    });
+
+    it('NO gana nada si solo coincide con una posición (no con el par requerido)', async () => {
+      const { service, tx } = buildService({
+        paletMultipliers,
+        // "34" coincide solo con el 1er premio (firstNumber "1234"), no con el 2do ("5678").
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 3, numberPlayed: '34', betType: 'palet' }],
+      });
+
+      const result = await service.processAwards(dto, 'user-1');
+
+      expect(result.awardsCreated).toBe(0);
+      expect(tx.txAwardCreate).not.toHaveBeenCalled();
+    });
   });
 });

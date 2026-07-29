@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { BetType } from '@/api/sales';
 
 const QUEUE_KEY = 'offline_sales_queue';
 
@@ -7,6 +8,7 @@ export interface QueuedSale {
   lotteryId: string;
   numberPlayed: string;
   amount: number;
+  betType?: BetType;
   createdAt: string;
 }
 

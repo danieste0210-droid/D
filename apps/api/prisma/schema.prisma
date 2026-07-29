@@ -26,6 +26,30 @@ enum SaleStatus {
   paid
 }
 
+// recto: apuesta tradicional (2/3/4 cifras, últimas-cifras + bono primeras-cifras en 4).
+// combinado: se juegan 3 o 4 cifras y el sistema cubre todas sus permutaciones contra el 1er premio.
+// palet: se juegan 2 cifras; gana premio mayor si coincide con 1er Y 2do premio a la vez,
+// o premio menor si coincide con 2do Y 3er premio a la vez.
+enum BetType {
+  recto
+  combinado
+  palet
+}
+
+// Categoría de coincidencia para un multiplicador "recto": contra las últimas N cifras del
+// resultado (la regla general), o contra las primeras 3 cifras -- bono exclusivo de los
+// billetes de 4 cifras completas, ver PayoutMultiplier.
+enum MatchType {
+  ultimas
+  primeras
+}
+
+// mayor: coincide con 1er Y 2do premio a la vez. menor: coincide con 2do Y 3er premio a la vez.
+enum PaletTier {
+  mayor
+  menor
+}
+
 enum AwardStatus {
   pending
   paid
@@ -33,15 +57,15 @@ enum AwardStatus {
 }
 
 model User {
-  id           String    @id @default(uuid())
+  id           String  @id @default(uuid())
   name         String
-  username     String    @unique
-  passwordHash String    @map("password_hash")
+  username     String  @unique
+  passwordHash String  @map("password_hash")
   role         Role
-  active       Boolean   @default(true)
-  supervisorId String?   @map("supervisor_id")
-  supervisor   User?     @relation("SupervisorToVendors", fields: [supervisorId], references: [id])
-  vendors      User[]    @relation("SupervisorToVendors")
+  active       Boolean @default(true)
+  supervisorId String? @map("supervisor_id")
+  supervisor   User?   @relation("SupervisorToVendors", fields: [supervisorId], references: [id])
+  vendors      User[]  @relation("SupervisorToVendors")
 
   twoFactorEnabled Boolean @default(false) @map("two_factor_enabled")
   // Cifrado en reposo con AES-256-GCM (ver common/crypto/secret-encryption.ts), nunca en texto
@@ -55,17 +79,17 @@ model User {
   // % de comisión del vendedor sobre sus ventas ("% GANANCIA" en la app de referencia).
   commissionPercent Decimal? @map("commission_percent") @db.Decimal(5, 2)
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
-  sales           Sale[]            @relation("SellerSales")
-  cancelledSales  Sale[]            @relation("CancelledBySales")
-  processedResults Result[]         @relation("ProcessedByResults")
-  auditLogs       AuditLog[]
-  sessions        UserSession[]
-  scheduleChanges LotteryScheduleChange[]
-  blockedNumbers  BlockedNumber[]
+  sales            Sale[]                  @relation("SellerSales")
+  cancelledSales   Sale[]                  @relation("CancelledBySales")
+  processedResults Result[]                @relation("ProcessedByResults")
+  auditLogs        AuditLog[]
+  sessions         UserSession[]
+  scheduleChanges  LotteryScheduleChange[]
+  blockedNumbers   BlockedNumber[]
 
   @@map("users")
 }
@@ -86,21 +110,23 @@ model UserSession {
 }
 
 model Lottery {
-  id        String   @id @default(uuid())
-  name      String
-  active    Boolean  @default(true)
-  blocked   Boolean  @default(false)
+  id                 String   @id @default(uuid())
+  name               String
+  active             Boolean  @default(true)
+  blocked            Boolean  @default(false)
   maxAmountPerNumber Decimal? @map("max_amount_per_number") @db.Decimal(12, 2)
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  closures         Closure[]
-  sales            Sale[]
-  results          Result[]
-  scheduleChanges  LotteryScheduleChange[]
-  payoutMultipliers PayoutMultiplier[]
-  blockedNumbers   BlockedNumber[]
+  closures             Closure[]
+  sales                Sale[]
+  results              Result[]
+  scheduleChanges      LotteryScheduleChange[]
+  payoutMultipliers    PayoutMultiplier[]
+  blockedNumbers       BlockedNumber[]
+  combinadoMultipliers CombinadoMultiplier[]
+  paletMultipliers     PaletMultiplier[]
 
   @@map("lotteries")
 }
@@ -109,18 +135,50 @@ model Lottery {
 // resultado (1ra/2da/3ra) en esta lotería. Reemplaza el multiplicador plano anterior -- el juego
 // real es tipo quiniela/pale, no un multiplicador único.
 model PayoutMultiplier {
+  id         String    @id @default(uuid())
+  lotteryId  String    @map("lottery_id")
+  lottery    Lottery   @relation(fields: [lotteryId], references: [id])
+  digitCount Int       @map("digit_count") // 2, 3 o 4 -- cantidad de cifras que jugó el cliente
+  position   Int // 1, 2 o 3 -- posición del resultado (1ra/2da/3ra)
+  matchType  MatchType @default(ultimas) @map("match_type")
+  multiplier Decimal   @db.Decimal(8, 2)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([lotteryId, digitCount, position, matchType])
+  @@map("payout_multipliers")
+}
+
+// Multiplicador de Combinado: se juegan 3 o 4 cifras y ganan todas sus permutaciones contra
+// el 1er premio únicamente (ver processAwards).
+model CombinadoMultiplier {
   id         String  @id @default(uuid())
   lotteryId  String  @map("lottery_id")
   lottery    Lottery @relation(fields: [lotteryId], references: [id])
-  digitCount Int     @map("digit_count") // 2, 3 o 4 -- cantidad de cifras que jugó el cliente
-  position   Int     // 1, 2 o 3 -- posición del resultado (1ra/2da/3ra)
+  digitCount Int     @map("digit_count") // 3 o 4
   multiplier Decimal @db.Decimal(8, 2)
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  @@unique([lotteryId, digitCount, position])
-  @@map("payout_multipliers")
+  @@unique([lotteryId, digitCount])
+  @@map("combinado_multipliers")
+}
+
+// Multiplicador de Palet: apuesta de 2 cifras que paga si coincide con dos posiciones a la vez.
+model PaletMultiplier {
+  id         String    @id @default(uuid())
+  lotteryId  String    @map("lottery_id")
+  lottery    Lottery   @relation(fields: [lotteryId], references: [id])
+  tier       PaletTier
+  multiplier Decimal   @db.Decimal(8, 2)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([lotteryId, tier])
+  @@map("palet_multipliers")
 }
 
 // Números que un admin bloquea para que no se puedan jugar en una lotería (control de riesgo).
@@ -140,11 +198,11 @@ model BlockedNumber {
 
 // Horario de cierre por lotería y día de la semana. Timezone siempre America/Panama.
 model Closure {
-  id         String  @id @default(uuid())
-  lotteryId  String  @map("lottery_id")
-  lottery    Lottery @relation(fields: [lotteryId], references: [id])
-  dayOfWeek  Int     @map("day_of_week") // 0 = domingo ... 6 = sábado
-  closeTime  String  @map("close_time")  // "HH:mm" en America/Panama
+  id        String  @id @default(uuid())
+  lotteryId String  @map("lottery_id")
+  lottery   Lottery @relation(fields: [lotteryId], references: [id])
+  dayOfWeek Int     @map("day_of_week") // 0 = domingo ... 6 = sábado
+  closeTime String  @map("close_time") // "HH:mm" en America/Panama
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -155,34 +213,35 @@ model Closure {
 
 // Historial de cambios de horario (quién y cuándo modificó un cierre).
 model LotteryScheduleChange {
-  id         String   @id @default(uuid())
-  lotteryId  String   @map("lottery_id")
-  lottery    Lottery  @relation(fields: [lotteryId], references: [id])
-  changedById String  @map("changed_by_id")
-  changedBy  User     @relation(fields: [changedById], references: [id])
-  before     Json?
-  after      Json?
-  createdAt  DateTime @default(now()) @map("created_at")
+  id          String   @id @default(uuid())
+  lotteryId   String   @map("lottery_id")
+  lottery     Lottery  @relation(fields: [lotteryId], references: [id])
+  changedById String   @map("changed_by_id")
+  changedBy   User     @relation(fields: [changedById], references: [id])
+  before      Json?
+  after       Json?
+  createdAt   DateTime @default(now()) @map("created_at")
 
   @@map("lottery_schedule_changes")
 }
 
 model Sale {
-  id            String     @id @default(uuid())
-  sellerId      String     @map("seller_id")
-  seller        User       @relation("SellerSales", fields: [sellerId], references: [id])
-  lotteryId     String     @map("lottery_id")
-  lottery       Lottery    @relation(fields: [lotteryId], references: [id])
-  numberPlayed  String     @map("number_played")
-  amount        Decimal    @db.Decimal(12, 2)
-  ticketCode    String     @unique @map("ticket_code")
-  status        SaleStatus @default(active)
+  id           String     @id @default(uuid())
+  sellerId     String     @map("seller_id")
+  seller       User       @relation("SellerSales", fields: [sellerId], references: [id])
+  lotteryId    String     @map("lottery_id")
+  lottery      Lottery    @relation(fields: [lotteryId], references: [id])
+  numberPlayed String     @map("number_played")
+  amount       Decimal    @db.Decimal(12, 2)
+  betType      BetType    @default(recto) @map("bet_type")
+  ticketCode   String     @unique @map("ticket_code")
+  status       SaleStatus @default(active)
 
-  createdAt    DateTime  @default(now()) @map("created_at")
-  cancelledAt  DateTime? @map("cancelled_at")
-  cancelledById String?  @map("cancelled_by_id")
-  cancelledBy  User?     @relation("CancelledBySales", fields: [cancelledById], references: [id])
-  cancelReason String?   @map("cancel_reason")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  cancelledAt   DateTime? @map("cancelled_at")
+  cancelledById String?   @map("cancelled_by_id")
+  cancelledBy   User?     @relation("CancelledBySales", fields: [cancelledById], references: [id])
+  cancelReason  String?   @map("cancel_reason")
 
   // Una venta puede ganar en varias posiciones a la vez (paga todas las que coincidan) -- ver
   // regla de coincidencia por últimas N cifras en lotteries.service.processAwards().
@@ -194,18 +253,18 @@ model Sale {
 }
 
 model Result {
-  id             String   @id @default(uuid())
-  lotteryId      String   @map("lottery_id")
-  lottery        Lottery  @relation(fields: [lotteryId], references: [id])
-  drawDate       DateTime @map("draw_date")
+  id             String    @id @default(uuid())
+  lotteryId      String    @map("lottery_id")
+  lottery        Lottery   @relation(fields: [lotteryId], references: [id])
+  drawDate       DateTime  @map("draw_date")
   // Quiniela: hasta 3 números ganadores, cada uno de hasta 4 cifras. Un número jugado de N
   // cifras gana si coincide con las últimas N cifras de cualquiera de estos tres.
-  firstNumber    String   @map("first_number")
-  secondNumber   String   @map("second_number")
-  thirdNumber    String   @map("third_number")
-  processedById  String   @map("processed_by_id")
-  processedBy    User     @relation("ProcessedByResults", fields: [processedById], references: [id])
-  processedAt    DateTime @default(now()) @map("processed_at")
+  firstNumber    String    @map("first_number")
+  secondNumber   String    @map("second_number")
+  thirdNumber    String    @map("third_number")
+  processedById  String    @map("processed_by_id")
+  processedBy    User      @relation("ProcessedByResults", fields: [processedById], references: [id])
+  processedAt    DateTime  @default(now()) @map("processed_at")
   reversedAt     DateTime? @map("reversed_at")
   reversalReason String?   @map("reversal_reason")
 
@@ -216,18 +275,18 @@ model Result {
 }
 
 model Award {
-  id        String      @id @default(uuid())
-  saleId    String      @map("sale_id")
-  sale      Sale        @relation(fields: [saleId], references: [id])
-  resultId  String      @map("result_id")
-  result    Result      @relation(fields: [resultId], references: [id])
+  id         String      @id @default(uuid())
+  saleId     String      @map("sale_id")
+  sale       Sale        @relation(fields: [saleId], references: [id])
+  resultId   String      @map("result_id")
+  result     Result      @relation(fields: [resultId], references: [id])
   // Posición del resultado que coincidió (1, 2 o 3) -- una venta puede tener hasta 3 awards,
   // uno por cada posición ganadora.
-  position  Int
-  amount    Decimal     @db.Decimal(12, 2)
-  status    AwardStatus @default(pending)
-  paidAt    DateTime?   @map("paid_at")
-  reversedAt DateTime?  @map("reversed_at")
+  position   Int
+  amount     Decimal     @db.Decimal(12, 2)
+  status     AwardStatus @default(pending)
+  paidAt     DateTime?   @map("paid_at")
+  reversedAt DateTime?   @map("reversed_at")
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -237,15 +296,15 @@ model Award {
 
 // Log de auditoría inmutable para toda acción que mueva dinero o cambie configuración sensible.
 model AuditLog {
-  id       String   @id @default(uuid())
-  userId   String?  @map("user_id")
-  user     User?    @relation(fields: [userId], references: [id])
-  action   String
-  entity   String
-  entityId String?  @map("entity_id")
-  before   Json?
-  after    Json?
-  ipAddress String? @map("ip_address")
+  id        String   @id @default(uuid())
+  userId    String?  @map("user_id")
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?  @map("entity_id")
+  before    Json?
+  after     Json?
+  ipAddress String?  @map("ip_address")
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([entity, entityId])

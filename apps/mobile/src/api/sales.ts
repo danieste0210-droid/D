@@ -3,12 +3,17 @@ import { endpoints } from './endpoints';
 
 export type SaleStatus = 'active' | 'cancelled' | 'paid';
 
+// recto: apuesta tradicional (2/3/4 cifras). combinado: cubre todas las permutaciones de 3/4
+// cifras contra el 1er premio. palet: 2 cifras, gana si coincide con dos posiciones a la vez.
+export type BetType = 'recto' | 'combinado' | 'palet';
+
 export interface Sale {
   id: string;
   sellerId: string;
   lotteryId: string;
   numberPlayed: string;
   amount: string; // Prisma Decimal se serializa como string
+  betType: BetType;
   ticketCode: string;
   status: SaleStatus;
   createdAt: string;
@@ -18,6 +23,7 @@ export interface CreateSalePayload {
   lotteryId: string;
   numberPlayed: string;
   amount: number;
+  betType?: BetType;
 }
 
 export function listAllSales(): Promise<Sale[]> {
