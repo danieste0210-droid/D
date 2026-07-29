@@ -1,5 +1,9 @@
-import { IsEnum, IsIn, IsNumber, IsOptional, IsPositive, IsUUID } from 'class-validator';
+import { IsEnum, IsIn, IsNumber, IsOptional, IsPositive, IsUUID, Max } from 'class-validator';
 import { MatchType } from '@prisma/client';
+
+// Tope de seguridad contra error de digitación (ej. escribir 25000 en vez de 2500) -- muy por
+// encima del multiplicador real más alto observado (2500x en 4 cifras exactas a $1).
+const MAX_MULTIPLIER = 10000;
 
 export class UpsertPayoutMultiplierDto {
   @IsUUID()
@@ -21,5 +25,6 @@ export class UpsertPayoutMultiplierDto {
 
   @IsNumber()
   @IsPositive()
+  @Max(MAX_MULTIPLIER)
   multiplier: number;
 }
