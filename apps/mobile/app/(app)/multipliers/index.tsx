@@ -14,10 +14,16 @@ const DIGIT_COUNTS = [2, 3, 4] as const;
 const POSITIONS = [1, 2, 3] as const;
 const POSITION_LABELS: Record<number, string> = { 1: '1ra', 2: '2da', 3: '3ra' };
 const COMBINADO_DIGIT_COUNTS = [3, 4] as const;
-const PALET_TIERS: PaletTier[] = ['mayor', 'menor'];
-const PALET_TIER_LABELS: Record<PaletTier, string> = { mayor: 'Premio mayor (1ra con 2da)', menor: 'Premio menor (2da con 3ra)' };
+const PALET_TIERS: PaletTier[] = ['mayor', 'medio', 'menor'];
+const PALET_TIER_LABELS: Record<PaletTier, string> = {
+  mayor: 'Premio mayor (1ra con 2da)',
+  medio: 'Premio medio (1ra con 3ra)',
+  menor: 'Premio menor (2da con 3ra)',
+};
 
-function rectoKey(digitCount: number, position: number, matchType: 'ultimas' | 'primeras') {
+type RectoMatchType = 'ultimas' | 'primeras' | 'ultimas2';
+
+function rectoKey(digitCount: number, position: number, matchType: RectoMatchType) {
   return `${digitCount}-${position}-${matchType}`;
 }
 
@@ -60,7 +66,7 @@ export default function MultipliersScreen() {
     setPaletValues(next);
   }, [paletMultipliers]);
 
-  const handleSaveRecto = async (digitCount: number, position: number, matchType: 'ultimas' | 'primeras') => {
+  const handleSaveRecto = async (digitCount: number, position: number, matchType: RectoMatchType) => {
     if (!lotteryId) return;
     const key = rectoKey(digitCount, position, matchType);
     const raw = rectoValues[key];
@@ -191,6 +197,36 @@ export default function MultipliersScreen() {
                       compact
                       mode="contained"
                       onPress={() => handleSaveRecto(4, position, 'primeras')}
+                      loading={savingKey === key}
+                      buttonColor={colors.brand}
+                    >
+                      Guardar
+                    </Button>
+                  </View>
+                );
+              })}
+            </View>
+
+            <Text variant="titleSmall" style={styles.sectionTitle}>
+              Bono: últimas 2 cifras (solo billetes de 4 cifras)
+            </Text>
+            <View style={styles.digitGroup}>
+              {POSITIONS.map((position) => {
+                const key = rectoKey(4, position, 'ultimas2');
+                return (
+                  <View key={key} style={styles.cellRow}>
+                    <Text style={styles.cellLabel}>{POSITION_LABELS[position]}</Text>
+                    <TextInput
+                      value={rectoValues[key] ?? ''}
+                      onChangeText={(v) => setRectoValues((prev) => ({ ...prev, [key]: v }))}
+                      keyboardType="decimal-pad"
+                      dense
+                      style={styles.cellInput}
+                    />
+                    <Button
+                      compact
+                      mode="contained"
+                      onPress={() => handleSaveRecto(4, position, 'ultimas2')}
                       loading={savingKey === key}
                       buttonColor={colors.brand}
                     >

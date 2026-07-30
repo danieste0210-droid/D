@@ -18,10 +18,10 @@ export class PayoutMultipliersService {
   // pantalla "Multiplicadores" de referencia -- cada campo tiene su propio botón "Guardar".
   upsert(dto: UpsertPayoutMultiplierDto) {
     const matchType = dto.matchType ?? MatchType.ultimas;
-    // "primeras" (bono de 3 primeras cifras) solo tiene sentido para billetes de 4 cifras
+    // "primeras" y "ultimas2" (bonos de 4 cifras) solo tienen sentido para billetes de 4 cifras
     // completas -- ver enum MatchType en schema.prisma.
-    if (matchType === MatchType.primeras && dto.digitCount !== 4) {
-      throw new BadRequestException('El bono de "primeras cifras" solo aplica a billetes de 4 cifras');
+    if (matchType !== MatchType.ultimas && dto.digitCount !== 4) {
+      throw new BadRequestException(`El bono "${matchType}" solo aplica a billetes de 4 cifras`);
     }
 
     return this.prisma.payoutMultiplier.upsert({

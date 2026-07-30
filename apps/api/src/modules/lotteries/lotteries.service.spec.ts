@@ -300,9 +300,10 @@ describe('LotteriesService.processAwards', () => {
     });
   });
 
-  describe('apuesta Palet', () => {
+  describe('apuesta Palet (cascada de 3 pasos: mayor -> medio -> menor)', () => {
     const paletMultipliers = [
       { tier: 'mayor', multiplier: 1000 },
+      { tier: 'medio', multiplier: 500 },
       { tier: 'menor', multiplier: 200 },
     ];
 
@@ -323,6 +324,22 @@ describe('LotteriesService.processAwards', () => {
       });
     });
 
+    it('gana premio medio si coincide con 1er Y 3er premio a la vez (no con el 2do)', async () => {
+      // firstNumber "1234" -> "34". thirdNumber ajustado para terminar también en "34".
+      const paletDto = { ...dto, thirdNumber: '9934' };
+      const { service, tx } = buildService({
+        paletMultipliers,
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 3, numberPlayed: '34', betType: 'palet' }],
+      });
+
+      const result = await service.processAwards(paletDto, 'user-1');
+
+      expect(result.awardsCreated).toBe(1);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({ position: 2, amount: 3 * 500 }),
+      });
+    });
+
     it('gana premio menor si coincide con 2do Y 3er premio a la vez (no con el 1ro)', async () => {
       // secondNumber "5678" -> "78". thirdNumber ajustado para terminar también en "78".
       const paletDto = { ...dto, thirdNumber: '9978' };
@@ -335,14 +352,46 @@ describe('LotteriesService.processAwards', () => {
 
       expect(result.awardsCreated).toBe(1);
       expect(tx.txAwardCreate).toHaveBeenCalledWith({
-        data: expect.objectContaining({ position: 2, amount: 3 * 200 }),
+        data: expect.objectContaining({ position: 3, amount: 3 * 200 }),
       });
     });
 
-    it('NO gana nada si solo coincide con una posición (no con el par requerido)', async () => {
+    it('si coinciden los 3 premios a la vez, paga SOLO mayor (primero en la cascada, no los tres)', async () => {
+      // Los 3 premios terminan en "34": califica para mayor, medio Y menor a la vez, pero la
+      // cascada se detiene en el primero que coincide.
+      const paletDto = { ...dto, secondNumber: '9934', thirdNumber: '9934' };
       const { service, tx } = buildService({
         paletMultipliers,
-        // "34" coincide solo con el 1er premio (firstNumber "1234"), no con el 2do ("5678").
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 3, numberPlayed: '34', betType: 'palet' }],
+      });
+
+      const result = await service.processAwards(paletDto, 'user-1');
+
+      expect(result.awardsCreated).toBe(1);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({ position: 1, amount: 3 * 1000 }),
+      });
+    });
+
+    it('si falta el multiplicador del tier que coincide, no paga nada (no cae al siguiente tier)', async () => {
+      // Califica para "mayor", pero mayor no tiene multiplicador configurado -- no debe pagar
+      // "medio" ni "menor" como si fuera un fallback, porque el ticket SÍ es mayor.
+      const paletDto = { ...dto, secondNumber: '9934' };
+      const { service, tx } = buildService({
+        paletMultipliers: [{ tier: 'medio', multiplier: 500 }, { tier: 'menor', multiplier: 200 }],
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 3, numberPlayed: '34', betType: 'palet' }],
+      });
+
+      const result = await service.processAwards(paletDto, 'user-1');
+
+      expect(result.awardsCreated).toBe(0);
+      expect(tx.txAwardCreate).not.toHaveBeenCalled();
+    });
+
+    it('NO gana nada si no coincide ningún par', async () => {
+      const { service, tx } = buildService({
+        paletMultipliers,
+        // "34" coincide solo con el 1er premio (firstNumber "1234"), no con el 2do ni el 3ro.
         sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 3, numberPlayed: '34', betType: 'palet' }],
       });
 
@@ -350,6 +399,63 @@ describe('LotteriesService.processAwards', () => {
 
       expect(result.awardsCreated).toBe(0);
       expect(tx.txAwardCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('bono "últimas 2 cifras" (billetes de 4 cifras completas)', () => {
+    const multipliersConUltimas2 = [
+      ...DEFAULT_MULTIPLIERS,
+      { digitCount: 4, position: 1, matchType: 'ultimas2', multiplier: 3 },
+    ];
+
+    it('gana el bono si coinciden las últimas 2 cifras aunque no coincida el resto', async () => {
+      // firstNumber "1234" -> últimas 2 = "34". numberPlayed "9934" comparte "34" pero no
+      // coincide exacto (1234 vs 9934) ni en las primeras 3 (123 vs 993).
+      const { service, tx } = buildService({
+        multipliers: multipliersConUltimas2,
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '9934', betType: 'recto' }],
+      });
+
+      const result = await service.processAwards(dto, 'user-1');
+
+      expect(result.awardsCreated).toBe(1);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({ position: 1, amount: 5 * 3 }),
+      });
+    });
+
+    it('un ticket ganador exacto acumula exacto, primeras Y últimas-2 a la vez (tres awards)', async () => {
+      const multipliersConTodo = [
+        ...DEFAULT_MULTIPLIERS,
+        { digitCount: 4, position: 1, matchType: 'primeras', multiplier: 50 },
+        { digitCount: 4, position: 1, matchType: 'ultimas2', multiplier: 3 },
+      ];
+      const { service, tx } = buildService({
+        multipliers: multipliersConTodo,
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '1234', betType: 'recto' }],
+      });
+
+      const result = await service.processAwards(dto, 'user-1');
+
+      expect(result.awardsCreated).toBe(3);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ position: 1, amount: 5 * 2200 }) });
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ position: 1, amount: 5 * 50 }) });
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ position: 1, amount: 5 * 3 }) });
+    });
+
+    it('no aplica a jugadas de 2 o 3 cifras', async () => {
+      const { service, tx } = buildService({
+        multipliers: multipliersConUltimas2,
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '34', betType: 'recto' }],
+      });
+
+      const result = await service.processAwards(dto, 'user-1');
+
+      // "34" de 2 cifras SÍ gana por la regla normal de últimas-cifras (multiplicador 60 en
+      // DEFAULT_MULTIPLIERS), pero NO debe generar un award adicional por "ultimas2" ya que ese
+      // bono es exclusivo de digitCount=4.
+      expect(result.awardsCreated).toBe(1);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ position: 1, amount: 5 * 60 }) });
     });
   });
 });

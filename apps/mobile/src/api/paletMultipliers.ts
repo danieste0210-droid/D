@@ -1,7 +1,9 @@
 import { apiFetch } from './client';
 import { endpoints } from './endpoints';
 
-export type PaletTier = 'mayor' | 'menor';
+// Cascada de 3 pasos (se paga solo el primero que coincida): mayor (1ra con 2da), medio
+// (1ra con 3ra), menor (2da con 3ra).
+export type PaletTier = 'mayor' | 'medio' | 'menor';
 
 export interface PaletMultiplier {
   id: string;

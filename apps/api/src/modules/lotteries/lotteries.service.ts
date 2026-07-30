@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { AwardStatus, BetType, MatchType, SaleStatus } from '@prisma/client';
+import { AwardStatus, BetType, MatchType, PaletTier, SaleStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateLotteryDto } from './dto/create-lottery.dto';
@@ -62,13 +62,13 @@ export class LotteriesService {
   // ventas activas de esa lotería, según su tipo de apuesta:
   //
   // - recto: un número jugado de N cifras gana contra una posición si coincide con las ÚLTIMAS
-  //   N cifras de esa posición. Si jugó 4 cifras completas, además gana un premio menor si
-  //   coinciden solo las PRIMERAS 3 cifras (bono exclusivo de los billetes de 4 cifras). Puede
-  //   ganar en varias posiciones/categorías a la vez -- se pagan todas sumadas.
+  //   N cifras de esa posición. Si jugó 4 cifras completas, además puede ganar bonos si coinciden
+  //   solo las PRIMERAS 3 cifras o solo las ÚLTIMAS 2 cifras (exclusivos de billetes de 4 cifras).
+  //   Puede ganar en varias posiciones/categorías a la vez -- se pagan todas sumadas.
   // - combinado: se juegan 3 o 4 cifras y se cubren todas sus permutaciones contra el 1er
   //   premio únicamente ("solo jugás con las últimas cifras de la lotería").
-  // - palet: se juegan 2 cifras; gana premio mayor si coincide con 1er Y 2do premio a la vez, o
-  //   premio menor si coincide con 2do Y 3er premio a la vez (no ambos).
+  // - palet: se juegan 2 cifras; cascada de 3 pasos, se paga solo el primero que coincida:
+  //   mayor (1er Y 2do premio a la vez), medio (1er Y 3er premio), menor (2do Y 3er premio).
   //
   // TODO(awards): si falta el multiplicador configurado para una combinación que sí tuvo
   // ventas, esa combinación no genera premio (no debería pasar si se configuran los
@@ -134,17 +134,21 @@ export class LotteriesService {
         }
 
         if (sale.betType === BetType.palet) {
-          const mayorMultiplier = paletMap.get('mayor');
-          const menorMultiplier = paletMap.get('menor');
-          const matchesMayor =
-            sale.numberPlayed === winningNumbers[0].slice(-2) && sale.numberPlayed === winningNumbers[1].slice(-2);
-          const matchesMenor =
-            sale.numberPlayed === winningNumbers[1].slice(-2) && sale.numberPlayed === winningNumbers[2].slice(-2);
+          const [first, second, third] = winningNumbers.map((n) => n.slice(-2));
+          // Cascada: se evalúa en este orden y se paga solo el primer par que coincida.
+          const cascade: { tier: PaletTier; position: number; matches: boolean }[] = [
+            { tier: PaletTier.mayor, position: 1, matches: sale.numberPlayed === first && sale.numberPlayed === second },
+            { tier: PaletTier.medio, position: 2, matches: sale.numberPlayed === first && sale.numberPlayed === third },
+            { tier: PaletTier.menor, position: 3, matches: sale.numberPlayed === second && sale.numberPlayed === third },
+          ];
 
-          if (matchesMayor && mayorMultiplier != null) {
-            await createAward(sale.id, 1, mayorMultiplier, amount, sale.sellerId);
-          } else if (matchesMenor && menorMultiplier != null) {
-            await createAward(sale.id, 2, menorMultiplier, amount, sale.sellerId);
+          for (const step of cascade) {
+            if (!step.matches) continue;
+            const multiplier = paletMap.get(step.tier);
+            if (multiplier != null) {
+              await createAward(sale.id, step.position, multiplier, amount, sale.sellerId);
+            }
+            break; // solo se paga el primer par que coincida, aunque falte su multiplicador.
           }
           continue;
         }
@@ -159,12 +163,19 @@ export class LotteriesService {
             await createAward(sale.id, position, multiplierUltimas, amount, sale.sellerId);
           }
 
-          // Bono "primeras 3 cifras": exclusivo de billetes de 4 cifras completas.
+          // Bonos exclusivos de billetes de 4 cifras completas: primeras 3 cifras, últimas 2
+          // cifras. Independientes entre sí y del match exacto -- un mismo ticket puede cobrar
+          // varios a la vez si sus cifras califican para más de una categoría.
           if (digitCount === 4 && winningNumber.length === 4) {
-            const matchesPrimeras = winningNumber.slice(0, 3) === sale.numberPlayed.slice(0, 3);
-            const multiplierPrimeras = rectoMap.get(`${digitCount}-${position}-${MatchType.primeras}`);
-            if (matchesPrimeras && multiplierPrimeras != null) {
-              await createAward(sale.id, position, multiplierPrimeras, amount, sale.sellerId);
+            const bonuses: { matchType: MatchType; matches: boolean }[] = [
+              { matchType: MatchType.primeras, matches: winningNumber.slice(0, 3) === sale.numberPlayed.slice(0, 3) },
+              { matchType: MatchType.ultimas2, matches: winningNumber.slice(-2) === sale.numberPlayed.slice(-2) },
+            ];
+            for (const bonus of bonuses) {
+              const multiplier = rectoMap.get(`${digitCount}-${position}-${bonus.matchType}`);
+              if (bonus.matches && multiplier != null) {
+                await createAward(sale.id, position, multiplier, amount, sale.sellerId);
+              }
             }
           }
         }

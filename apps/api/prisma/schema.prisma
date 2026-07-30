@@ -37,16 +37,21 @@ enum BetType {
 }
 
 // Categoría de coincidencia para un multiplicador "recto": contra las últimas N cifras del
-// resultado (la regla general), o contra las primeras 3 cifras -- bono exclusivo de los
-// billetes de 4 cifras completas, ver PayoutMultiplier.
+// resultado (la regla general). "primeras" y "ultimas2" son bonos exclusivos de los billetes de
+// 4 cifras completas (primeras 3 cifras / últimas 2 cifras), ver PayoutMultiplier.
 enum MatchType {
   ultimas
   primeras
+  ultimas2
 }
 
-// mayor: coincide con 1er Y 2do premio a la vez. menor: coincide con 2do Y 3er premio a la vez.
+// Cascada de 3 pasos (se paga solo el primero que coincida, en este orden):
+// mayor: coincide con 1er Y 2do premio a la vez.
+// medio: coincide con 1er Y 3er premio a la vez.
+// menor: coincide con 2do Y 3er premio a la vez.
 enum PaletTier {
   mayor
+  medio
   menor
 }
 
