@@ -8,6 +8,19 @@ export class ApiError extends Error {
   }
 }
 
+// El HttpExceptionFilter del backend envuelve la respuesta de Nest (que a su vez ya trae
+// {statusCode, message, error}) en un nivel extra: {statusCode, timestamp, message: {...}}.
+// Sin desempacar ese anidado, `err.body.message` es un objeto y String(objeto) da "[object
+// Object]" en vez del texto real -- ver apps/api/src/common/filters/http-exception.filter.ts.
+export function getErrorMessage(err: unknown, fallback: string): string {
+  if (!(err instanceof ApiError)) return fallback;
+  const outer = (err.body as { message?: unknown } | null)?.message;
+  const inner = outer && typeof outer === 'object' && 'message' in outer ? (outer as { message?: unknown }).message : outer;
+  if (typeof inner === 'string') return inner;
+  if (Array.isArray(inner)) return inner.join(', ');
+  return fallback;
+}
+
 // Comparte una sola llamada de refresh entre requests 401 concurrentes -- si dos peticiones
 // disparan el refresh a la vez, la segunda reutiliza el refreshToken ya revocado por la
 // primera y fallaría innecesariamente.

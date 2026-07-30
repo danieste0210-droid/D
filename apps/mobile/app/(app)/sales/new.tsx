@@ -6,7 +6,8 @@ import { colors } from '@/theme/colors';
 import { useAuthStore } from '@/state/authStore';
 import { useLotteriesForDay } from '@/features/lotteries/hooks';
 import { useCreateBatchSale } from '@/features/sales/hooks';
-import { ApiError, type BatchSaleItem, type BetType, type Sale } from '@/api/sales';
+import { getErrorMessage } from '@/api/client';
+import type { BatchSaleItem, BetType, Sale } from '@/api/sales';
 import type { LotteryForDay } from '@/api/lotteries';
 import { usePrinterStore } from '@/printing/printerStore';
 import { printTicket } from '@/printing/blePrinter';
@@ -57,7 +58,9 @@ export default function NewSaleScreen() {
 
   const selectedLotteries = (lotteries ?? []).filter((l: LotteryForDay) => selectedLotteryIds.includes(l.id));
   const pendingTotal = (parseAmount(rectoValue) ?? 0) + (parseAmount(combinadoValue) ?? 0) + (parseAmount(paletValue) ?? 0);
-  const cartTotal = cart.reduce((sum, item) => sum + item.amount, 0);
+  // El carrito se juega en TODAS las loterías seleccionadas -- el total a cobrar es el del
+  // carrito multiplicado por la cantidad de loterías marcadas, no solo la suma del carrito.
+  const cartTotal = cart.reduce((sum, item) => sum + item.amount, 0) * Math.max(selectedLotteryIds.length, 1);
 
   const toggleLottery = (id: string) => {
     setSelectedLotteryIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -131,11 +134,7 @@ export default function NewSaleScreen() {
       tryPrintAll(sales);
       router.back();
     } catch (err) {
-      const message =
-        err instanceof ApiError && typeof err.body === 'object' && err.body && 'message' in err.body
-          ? String((err.body as any).message)
-          : 'No se pudo procesar el carrito (revisa conexión y horarios de cierre)';
-      setError(message);
+      setError(getErrorMessage(err, 'No se pudo procesar el carrito (revisa conexión y horarios de cierre)'));
     }
   };
 
