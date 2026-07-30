@@ -6,6 +6,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { Audit } from '../../common/decorators/audit.decorator';
 import { CurrentUser, AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { CreateSaleDto } from './dto/create-sale.dto';
+import { CreateBatchSaleDto } from './dto/create-batch-sale.dto';
 import { SearchSaleDto } from './dto/search-sale.dto';
 import { CancelSaleDto } from './dto/cancel-sale.dto';
 import { SalesService } from './sales.service';
@@ -23,6 +24,16 @@ export class SalesController {
   @Audit({ action: 'sale.create', entity: 'Sale' })
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateSaleDto) {
     return this.salesService.create(user.id, dto);
+  }
+
+  // "Números y Valores": un carrito de números se juega en varias loterías a la vez, cada
+  // número con montos independientes por tipo de apuesta (recto/combinado/palet).
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post('process-batch')
+  @Roles(Role.vendedor)
+  @Audit({ action: 'sale.createBatch', entity: 'Sale' })
+  createBatch(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateBatchSaleDto) {
+    return this.salesService.createBatch(user.id, dto);
   }
 
   @Get('sales/all')
@@ -43,8 +54,8 @@ export class SalesController {
 
   @Get('sales/ultsale')
   @Roles(Role.vendedor)
-  lastSale(@CurrentUser() user: AuthenticatedUser) {
-    return this.salesService.lastSale(user.id);
+  lastSale(@CurrentUser() user: AuthenticatedUser, @Query('date') date?: string) {
+    return this.salesService.lastSale(user.id, date);
   }
 
   @Delete('sales/delete/:id')

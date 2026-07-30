@@ -14,6 +14,8 @@ export interface Sale {
   numberPlayed: string;
   amount: string; // Prisma Decimal se serializa como string
   betType: BetType;
+  customerName: string | null;
+  customerPhone: string | null;
   ticketCode: string;
   status: SaleStatus;
   createdAt: string;
@@ -24,6 +26,24 @@ export interface CreateSalePayload {
   numberPlayed: string;
   amount: number;
   betType?: BetType;
+  customerName?: string;
+  customerPhone?: string;
+}
+
+// "Números y Valores": un mismo número puede jugarse recto, combinado y/o palet a la vez dentro
+// de la misma fila del carrito -- cada monto presente genera su propia venta independiente.
+export interface BatchSaleItem {
+  numberPlayed: string;
+  rectoAmount?: number;
+  combinadoAmount?: number;
+  paletAmount?: number;
+}
+
+export interface CreateBatchSalePayload {
+  lotteryIds: string[];
+  customerName?: string;
+  customerPhone?: string;
+  items: BatchSaleItem[];
 }
 
 export function listAllSales(): Promise<Sale[]> {
@@ -41,6 +61,10 @@ export function createSale(payload: CreateSalePayload): Promise<Sale> {
   return apiFetch<Sale>(endpoints.sales.process, { method: 'POST', body: JSON.stringify(payload) });
 }
 
+export function createBatchSale(payload: CreateBatchSalePayload): Promise<Sale[]> {
+  return apiFetch<Sale[]>(endpoints.sales.processBatch, { method: 'POST', body: JSON.stringify(payload) });
+}
+
 export function cancelSale(id: string, reason: string): Promise<Sale> {
   return apiFetch<Sale>(endpoints.sales.cancel(id), { method: 'DELETE', body: JSON.stringify({ reason }) });
 }
@@ -50,8 +74,8 @@ export function adminCancelSale(id: string, reason: string): Promise<Sale> {
   return apiFetch<Sale>(endpoints.sales.adminCancel(id), { method: 'DELETE', body: JSON.stringify({ reason }) });
 }
 
-export function getLastSale(): Promise<Sale | null> {
-  return apiFetch<Sale | null>(endpoints.sales.lastSale);
+export function getLastSale(date?: string): Promise<Sale | null> {
+  return apiFetch<Sale | null>(endpoints.sales.lastSale(date));
 }
 
 export { ApiError };

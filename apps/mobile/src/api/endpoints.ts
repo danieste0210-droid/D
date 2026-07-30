@@ -8,10 +8,11 @@ export const endpoints = {
   },
   sales: {
     process: '/sale/process',
+    processBatch: '/sale/process-batch',
     all: '/sale/sales/all',
     search: '/sale/sales/search',
     summary: '/sale/sales/sumary',
-    lastSale: '/sale/sales/ultsale',
+    lastSale: (date?: string) => `/sale/sales/ultsale${date ? `?date=${date}` : ''}`,
     cancel: (id: string) => `/sale/sales/delete/${id}`,
     adminCancel: (id: string) => `/sale/admin/delete/${id}`,
   },

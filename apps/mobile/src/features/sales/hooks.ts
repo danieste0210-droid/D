@@ -21,6 +21,17 @@ export function useCreateSale() {
   });
 }
 
+export function useCreateBatchSale() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: salesApi.createBatchSale,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [MY_SALES_KEY] });
+      queryClient.invalidateQueries({ queryKey: ['last-sale'] });
+    },
+  });
+}
+
 export function useCancelSale() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -29,11 +40,11 @@ export function useCancelSale() {
   });
 }
 
-export function useLastSale() {
+export function useLastSale(date?: string) {
   const userId = useAuthStore((s) => s.user?.id);
   return useQuery({
-    queryKey: ['last-sale', userId],
-    queryFn: salesApi.getLastSale,
+    queryKey: ['last-sale', userId, date],
+    queryFn: () => salesApi.getLastSale(date),
     enabled: !!userId,
   });
 }

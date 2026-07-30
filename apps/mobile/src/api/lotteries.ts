@@ -23,8 +23,18 @@ export interface ProcessAwardsPayload {
   thirdNumber: string;
 }
 
+export interface LotteryForDay extends Lottery {
+  closures: { openTime: string | null; closeTime: string }[];
+}
+
 export function listLotteries(): Promise<Lottery[]> {
   return apiFetch<Lottery[]>(endpoints.lotteries.all);
+}
+
+// Loterías vendibles en un día de la semana dado (0=domingo..6=sábado), con su horario efectivo
+// (excepción propia o heredado del horario general) -- usado en el paso "Loterías" de Nueva Venta.
+export function listLotteriesForDay(dayOfWeek: number): Promise<LotteryForDay[]> {
+  return apiFetch<LotteryForDay[]>(`${endpoints.lotteries.day}?dayOfWeek=${dayOfWeek}`);
 }
 
 export function createLottery(payload: CreateLotteryPayload): Promise<Lottery> {

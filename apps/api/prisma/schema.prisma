@@ -249,16 +249,20 @@ model LotteryScheduleChange {
 }
 
 model Sale {
-  id           String     @id @default(uuid())
-  sellerId     String     @map("seller_id")
-  seller       User       @relation("SellerSales", fields: [sellerId], references: [id])
-  lotteryId    String     @map("lottery_id")
-  lottery      Lottery    @relation(fields: [lotteryId], references: [id])
-  numberPlayed String     @map("number_played")
-  amount       Decimal    @db.Decimal(12, 2)
-  betType      BetType    @default(recto) @map("bet_type")
-  ticketCode   String     @unique @map("ticket_code")
-  status       SaleStatus @default(active)
+  id            String     @id @default(uuid())
+  sellerId      String     @map("seller_id")
+  seller        User       @relation("SellerSales", fields: [sellerId], references: [id])
+  lotteryId     String     @map("lottery_id")
+  lottery       Lottery    @relation(fields: [lotteryId], references: [id])
+  numberPlayed  String     @map("number_played")
+  amount        Decimal    @db.Decimal(12, 2)
+  betType       BetType    @default(recto) @map("bet_type")
+  // Capturados en la pantalla "Números y Valores" -- opcionales, para poder ubicar la venta si
+  // el cliente reclama un premio.
+  customerName  String?    @map("customer_name")
+  customerPhone String?    @map("customer_phone")
+  ticketCode    String     @unique @map("ticket_code")
+  status        SaleStatus @default(active)
 
   createdAt     DateTime  @default(now()) @map("created_at")
   cancelledAt   DateTime? @map("cancelled_at")

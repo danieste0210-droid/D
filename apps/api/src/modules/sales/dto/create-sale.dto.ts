@@ -1,4 +1,4 @@
-import { IsEnum, IsNumber, IsOptional, IsPositive, IsUUID, Matches } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Matches } from 'class-validator';
 import { BetType } from '@prisma/client';
 
 export class CreateSaleDto {
@@ -19,4 +19,12 @@ export class CreateSaleDto {
   @IsNumber()
   @IsPositive()
   amount: number;
+
+  @IsOptional()
+  @IsString()
+  customerName?: string;
+
+  @IsOptional()
+  @IsString()
+  customerPhone?: string;
 }

@@ -66,5 +66,9 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, allow
     throw new ApiError(response.status, body);
   }
 
-  return response.json();
+  // Nest serializa un controller que retorna null/undefined (ej. "última venta" sin resultados)
+  // como 200 con body vacío, no como el literal "null" -- response.json() reventaría con
+  // SyntaxError si se le pide parsear una cadena vacía.
+  const text = await response.text();
+  return text ? JSON.parse(text) : (null as T);
 }

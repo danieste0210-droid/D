@@ -11,6 +11,14 @@ export function useLotteries() {
   });
 }
 
+export function useLotteriesForDay(dayOfWeek: number) {
+  return useQuery({
+    queryKey: [LOTTERIES_KEY, 'day', dayOfWeek],
+    queryFn: () => lotteriesApi.listLotteriesForDay(dayOfWeek),
+    staleTime: 60_000,
+  });
+}
+
 export function useCreateLottery() {
   const queryClient = useQueryClient();
   return useMutation({

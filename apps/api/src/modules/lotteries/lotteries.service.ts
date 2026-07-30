@@ -43,11 +43,27 @@ export class LotteriesService {
     return this.prisma.lottery.findMany();
   }
 
-  findForDay(dayOfWeek: number) {
-    return this.prisma.lottery.findMany({
-      where: { active: true, closures: { some: { dayOfWeek } } },
-      include: { closures: { where: { dayOfWeek } } },
+  // Loterías vendibles ese día: las que tienen su propio Closure para el día, MÁS las que no
+  // tienen excepción propia pero heredan el horario general (ClosureDefault) -- debe reflejar
+  // la misma prioridad que ClosuresService.isLotteryOpen(), si no una lotería que solo depende
+  // del horario general nunca aparecería como vendible en el paso "Loterías" de Nueva Venta.
+  async findForDay(dayOfWeek: number) {
+    const [withOwnClosure, defaultForDay] = await Promise.all([
+      this.prisma.lottery.findMany({
+        where: { active: true, blocked: false, closures: { some: { dayOfWeek } } },
+        include: { closures: { where: { dayOfWeek } } },
+      }),
+      this.prisma.closureDefault.findUnique({ where: { dayOfWeek } }),
+    ]);
+
+    if (!defaultForDay) return withOwnClosure;
+
+    const excludedIds = withOwnClosure.map((l) => l.id);
+    const viaDefault = await this.prisma.lottery.findMany({
+      where: { active: true, blocked: false, id: { notIn: excludedIds } },
     });
+
+    return [...withOwnClosure, ...viaDefault.map((l) => ({ ...l, closures: [defaultForDay] }))];
   }
 
   getResults(lotteryId: string) {
