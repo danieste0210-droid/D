@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { BetType, Prisma, SaleStatus } from '@prisma/client';
+import { BetType, Lottery, Prisma, SaleStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ClosuresService } from '../closures/closures.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
@@ -38,43 +38,80 @@ export class SalesService {
   // Venta en lote: los mismos números del carrito se juegan en TODAS las loterías seleccionadas
   // (una venta por lotería x tipo-con-monto presente en cada ítem). Todo o nada dentro de una
   // sola transacción -- si un solo ítem falla su validación, no se crea ninguna venta del lote.
+  //
+  // Lotería/horario/números-bloqueados se resuelven ANTES de abrir la transacción: no dependen
+  // de las ventas que se están creando, así que no hay razón para pagar esos round-trips a Neon
+  // mientras la transacción interactiva sigue abierta. Con varias loterías seleccionadas, hacer
+  // esos lookups (2-3 queries cada uno) dentro de la transacción superaba su timeout por defecto
+  // de 5000ms ("Transaction already closed... Nms passed") y la venta completa fallaba con 500.
   async createBatch(sellerId: string, dto: CreateBatchSaleDto) {
-    return this.prisma.$transaction(async (tx) => {
-      const created = [];
-      for (const lotteryId of dto.lotteryIds) {
-        for (const item of dto.items) {
-          const shared = {
-            lotteryId,
-            numberPlayed: item.numberPlayed,
-            customerName: dto.customerName,
-            customerPhone: dto.customerPhone,
+    const lotteries = await this.prisma.lottery.findMany({ where: { id: { in: dto.lotteryIds } } });
+    const lotteryById = new Map(lotteries.map((l) => [l.id, l]));
+
+    const openByLotteryId = new Map<string, boolean>();
+    for (const lotteryId of dto.lotteryIds) {
+      openByLotteryId.set(lotteryId, await this.closures.isLotteryOpen(lotteryId));
+    }
+
+    const numbers = [...new Set(dto.items.map((i) => i.numberPlayed))];
+    const blockedNumbers = await this.prisma.blockedNumber.findMany({
+      where: { lotteryId: { in: dto.lotteryIds }, number: { in: numbers } },
+    });
+    const blockedSet = new Set(blockedNumbers.map((b) => `${b.lotteryId}:${b.number}`));
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        const created = [];
+        for (const lotteryId of dto.lotteryIds) {
+          const precomputed = {
+            lottery: lotteryById.get(lotteryId),
+            isOpen: openByLotteryId.get(lotteryId) ?? false,
           };
-          if (item.rectoAmount != null) {
-            created.push(await this.createOne(tx, sellerId, { ...shared, amount: item.rectoAmount, betType: BetType.recto }));
-          }
-          if (item.combinadoAmount != null) {
-            created.push(await this.createOne(tx, sellerId, { ...shared, amount: item.combinadoAmount, betType: BetType.combinado }));
-          }
-          if (item.paletAmount != null) {
-            created.push(await this.createOne(tx, sellerId, { ...shared, amount: item.paletAmount, betType: BetType.palet }));
+          for (const item of dto.items) {
+            const shared = {
+              lotteryId,
+              numberPlayed: item.numberPlayed,
+              customerName: dto.customerName,
+              customerPhone: dto.customerPhone,
+            };
+            const isBlocked = blockedSet.has(`${lotteryId}:${item.numberPlayed}`);
+            if (item.rectoAmount != null) {
+              created.push(
+                await this.createOne(tx, sellerId, { ...shared, amount: item.rectoAmount, betType: BetType.recto }, { ...precomputed, isBlocked }),
+              );
+            }
+            if (item.combinadoAmount != null) {
+              created.push(
+                await this.createOne(tx, sellerId, { ...shared, amount: item.combinadoAmount, betType: BetType.combinado }, { ...precomputed, isBlocked }),
+              );
+            }
+            if (item.paletAmount != null) {
+              created.push(
+                await this.createOne(tx, sellerId, { ...shared, amount: item.paletAmount, betType: BetType.palet }, { ...precomputed, isBlocked }),
+              );
+            }
           }
         }
-      }
-      if (created.length === 0) {
-        throw new BadRequestException('No hay ningún monto para procesar en el carrito');
-      }
-      return created;
-    });
+        if (created.length === 0) {
+          throw new BadRequestException('No hay ningún monto para procesar en el carrito');
+        }
+        return created;
+      },
+      { timeout: 15_000 },
+    );
   }
 
   // Núcleo compartido entre create() (una venta) y createBatch() (varias en una transacción).
   // Recibe el cliente de Prisma (normal o de transacción) para que las validaciones y el insert
   // se ejecuten con la misma vista consistente de los datos -- importante para el chequeo de
   // monto máximo por número, que debe ver las ventas ya creadas antes en el mismo lote.
+  // `precomputed`, cuando se da (desde createBatch), evita repetir lookups de lotería/horario/
+  // bloqueo que ya se resolvieron antes de abrir la transacción.
   private async createOne(
     client: PrismaService | Prisma.TransactionClient,
     sellerId: string,
     input: SaleInput,
+    precomputed?: { lottery: Lottery | undefined; isOpen: boolean; isBlocked: boolean },
   ) {
     const validDigitCounts = VALID_DIGIT_COUNTS[input.betType];
     if (!validDigitCounts.includes(input.numberPlayed.length)) {
@@ -83,20 +120,22 @@ export class SalesService {
       );
     }
 
-    const lottery = await client.lottery.findUnique({ where: { id: input.lotteryId } });
+    const lottery = precomputed ? precomputed.lottery : await client.lottery.findUnique({ where: { id: input.lotteryId } });
     if (!lottery || !lottery.active || lottery.blocked) {
       throw new BadRequestException('Lotería no disponible');
     }
 
-    const isOpen = await this.closures.isLotteryOpen(input.lotteryId);
+    const isOpen = precomputed ? precomputed.isOpen : await this.closures.isLotteryOpen(input.lotteryId);
     if (!isOpen) {
       throw new ForbiddenException(`${lottery.name} ya cerró para el horario actual`);
     }
 
-    const blocked = await client.blockedNumber.findUnique({
-      where: { lotteryId_number: { lotteryId: input.lotteryId, number: input.numberPlayed } },
-    });
-    if (blocked) {
+    const isBlocked = precomputed
+      ? precomputed.isBlocked
+      : !!(await client.blockedNumber.findUnique({
+          where: { lotteryId_number: { lotteryId: input.lotteryId, number: input.numberPlayed } },
+        }));
+    if (isBlocked) {
       throw new ForbiddenException(`El número ${input.numberPlayed} está bloqueado para ${lottery.name}`);
     }
 

@@ -13,10 +13,22 @@ function buildService(overrides: { lotteries?: Record<string, any>; blockedNumbe
   const saleFindFirst = jest.fn().mockResolvedValue(null);
 
   const client = {
-    lottery: { findUnique: jest.fn(({ where }: any) => Promise.resolve(lotteries[where.id] ?? null)) },
+    lottery: {
+      findUnique: jest.fn(({ where }: any) => Promise.resolve(lotteries[where.id] ?? null)),
+      findMany: jest.fn(({ where }: any) => Promise.resolve(where.id.in.map((id: string) => lotteries[id]).filter(Boolean))),
+    },
     blockedNumber: {
       findUnique: jest.fn(({ where }: any) =>
         Promise.resolve(blockedNumbers[`${where.lotteryId_number.lotteryId}-${where.lotteryId_number.number}`] ?? null),
+      ),
+      findMany: jest.fn(({ where }: any) =>
+        Promise.resolve(
+          where.lotteryId.in.flatMap((lotteryId: string) =>
+            where.number.in
+              .filter((number: string) => blockedNumbers[`${lotteryId}-${number}`])
+              .map((number: string) => ({ ...blockedNumbers[`${lotteryId}-${number}`], lotteryId, number })),
+          ),
+        ),
       ),
     },
     sale: { create: saleCreate, aggregate: saleAggregate, findFirst: saleFindFirst },
