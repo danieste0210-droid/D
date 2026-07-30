@@ -9,7 +9,14 @@ import { CreateSaleDto } from './dto/create-sale.dto';
 import { CreateBatchSaleDto } from './dto/create-batch-sale.dto';
 import { SearchSaleDto } from './dto/search-sale.dto';
 import { CancelSaleDto } from './dto/cancel-sale.dto';
+import { AddLotteryToBatchDto } from './dto/add-lottery-to-batch.dto';
 import { SalesService } from './sales.service';
+
+// admin/super pueden operar sobre ventas de cualquier vendedor; un vendedor solo sobre las suyas
+// (cada método de SalesService que recibe isPrivileged lo revalida igual del lado del servidor).
+function isPrivileged(user: AuthenticatedUser): boolean {
+  return user.role === Role.admin || user.role === Role.super;
+}
 
 @ApiTags('sales')
 @Controller('v1/sale')
@@ -57,6 +64,47 @@ export class SalesController {
   @Roles(Role.vendedor, Role.admin, Role.super)
   lastSale(@CurrentUser() user: AuthenticatedUser, @Query('date') date?: string) {
     return this.salesService.lastSale(user.id, date);
+  }
+
+  // Pantalla "Ventas": una fila por venta agrupada (batchId), no por línea individual.
+  @Get('sales/mybatches')
+  @Roles(Role.vendedor, Role.admin, Role.super)
+  listMyBatches(@CurrentUser() user: AuthenticatedUser) {
+    return this.salesService.listMyBatches(user.id);
+  }
+
+  // Recibo de una venta agrupada: detalle completo (loterías, jugadas, multiplicadores vigentes).
+  @Get('batch/:batchId')
+  @Roles(Role.vendedor, Role.admin, Role.super)
+  getBatch(@Param('batchId') batchId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.salesService.getBatch(batchId, user.id, isPrivileged(user));
+  }
+
+  @Delete('batch/:batchId')
+  @Roles(Role.vendedor, Role.admin, Role.super)
+  @Audit({ action: 'sale.cancelBatch', entity: 'Sale' })
+  cancelBatch(@Param('batchId') batchId: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: CancelSaleDto) {
+    return this.salesService.cancelBatch(batchId, user.id, dto.reason, isPrivileged(user));
+  }
+
+  // Agrega una lotería a una venta ya creada, jugando el mismo carrito que ya tiene el lote.
+  @Post('batch/:batchId/lotteries')
+  @Roles(Role.vendedor, Role.admin, Role.super)
+  @Audit({ action: 'sale.addLotteryToBatch', entity: 'Sale' })
+  addLotteryToBatch(@Param('batchId') batchId: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: AddLotteryToBatchDto) {
+    return this.salesService.addLotteryToBatch(batchId, dto.lotteryId, user.id, isPrivileged(user));
+  }
+
+  // Quita una lotería de una venta agrupada (cancela solo sus líneas); no deja la venta sin ninguna.
+  @Delete('batch/:batchId/lotteries/:lotteryId')
+  @Roles(Role.vendedor, Role.admin, Role.super)
+  @Audit({ action: 'sale.removeLotteryFromBatch', entity: 'Sale' })
+  removeLotteryFromBatch(
+    @Param('batchId') batchId: string,
+    @Param('lotteryId') lotteryId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.salesService.removeLotteryFromBatch(batchId, lotteryId, user.id, isPrivileged(user));
   }
 
   @Delete('sales/delete/:id')

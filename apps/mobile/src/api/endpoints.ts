@@ -15,6 +15,10 @@ export const endpoints = {
     lastSale: (date?: string) => `/sale/sales/ultsale${date ? `?date=${date}` : ''}`,
     cancel: (id: string) => `/sale/sales/delete/${id}`,
     adminCancel: (id: string) => `/sale/admin/delete/${id}`,
+    myBatches: '/sale/sales/mybatches',
+    batch: (batchId: string) => `/sale/batch/${batchId}`,
+    batchLotteries: (batchId: string) => `/sale/batch/${batchId}/lotteries`,
+    batchLottery: (batchId: string, lotteryId: string) => `/sale/batch/${batchId}/lotteries/${lotteryId}`,
   },
   lotteries: {
     create: '/lotteries/create',

@@ -21,6 +21,8 @@ interface SaleInput {
   betType: BetType;
   customerName?: string;
   customerPhone?: string;
+  batchId: string;
+  ticketCode: string;
 }
 
 // TODO(sales): impresión de ticket (QR/código de verificación) vía react-native-ble-plx en mobile.
@@ -32,12 +34,20 @@ export class SalesService {
   ) {}
 
   async create(sellerId: string, dto: CreateSaleDto) {
-    return this.createOne(this.prisma, sellerId, { ...dto, betType: dto.betType ?? BetType.recto });
+    return this.createOne(this.prisma, sellerId, {
+      ...dto,
+      betType: dto.betType ?? BetType.recto,
+      batchId: randomUUID(),
+      ticketCode: generateTicketCode(),
+    });
   }
 
   // Venta en lote: los mismos números del carrito se juegan en TODAS las loterías seleccionadas
   // (una venta por lotería x tipo-con-monto presente en cada ítem). Todo o nada dentro de una
   // sola transacción -- si un solo ítem falla su validación, no se crea ninguna venta del lote.
+  // Todas las líneas resultantes comparten un mismo batchId/ticketCode: para el vendedor y el
+  // cliente esto es UNA sola venta, aunque abajo sigan siendo varias filas de Sale (necesario
+  // para calcular premios por lotería x tipo de apuesta por separado).
   //
   // Lotería/horario/números-bloqueados se resuelven ANTES de abrir la transacción: no dependen
   // de las ventas que se están creando, así que no hay razón para pagar esos round-trips a Neon
@@ -59,6 +69,9 @@ export class SalesService {
     });
     const blockedSet = new Set(blockedNumbers.map((b) => `${b.lotteryId}:${b.number}`));
 
+    const batchId = randomUUID();
+    const ticketCode = generateTicketCode();
+
     return this.prisma.$transaction(
       async (tx) => {
         const created = [];
@@ -73,6 +86,8 @@ export class SalesService {
               numberPlayed: item.numberPlayed,
               customerName: dto.customerName,
               customerPhone: dto.customerPhone,
+              batchId,
+              ticketCode,
             };
             const isBlocked = blockedSet.has(`${lotteryId}:${item.numberPlayed}`);
             if (item.rectoAmount != null) {
@@ -161,7 +176,8 @@ export class SalesService {
         betType: input.betType,
         customerName: input.customerName,
         customerPhone: input.customerPhone,
-        ticketCode: randomUUID(),
+        batchId: input.batchId,
+        ticketCode: input.ticketCode,
         status: SaleStatus.active,
       },
     });
@@ -211,7 +227,227 @@ export class SalesService {
     });
   }
 
-  // Cancelación por el propio vendedor: solo permitida antes del cierre.
+  // Recibo de una venta agrupada: todas las líneas de un mismo batchId (una o varias loterías x
+  // tipos de apuesta), agrupadas por lotería, con el snapshot de multiplicadores vigentes para el
+  // pie del recibo (ver referencia legado: "2 CIFRAS", "TRIPLE", "PALE").
+  async getBatch(batchId: string, requesterId: string, isPrivileged: boolean) {
+    const lines = await this.prisma.sale.findMany({
+      where: { batchId },
+      include: { lottery: true, seller: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (lines.length === 0) throw new NotFoundException('Venta no encontrada');
+
+    const first = lines[0];
+    if (!isPrivileged && first.sellerId !== requesterId) {
+      throw new ForbiddenException('No puedes ver ventas de otro vendedor');
+    }
+
+    // Una lotería "quitada" de la venta (removeLotteryFromBatch canceló TODAS sus líneas) ya no
+    // debe aparecer en el recibo -- este visor refleja el estado ACTUAL de la venta, no el
+    // historial completo de cada línea que alguna vez tuvo.
+    const activeLotteryIds = [...new Set(lines.filter((l) => l.status === SaleStatus.active).map((l) => l.lotteryId))];
+    const [payoutMultipliers, paletMultipliers] = await Promise.all([
+      this.prisma.payoutMultiplier.findMany({ where: { lotteryId: { in: activeLotteryIds } } }),
+      this.prisma.paletMultiplier.findMany({ where: { lotteryId: { in: activeLotteryIds } } }),
+    ]);
+
+    const lotteries = activeLotteryIds.map((lotteryId) => {
+      const lotteryLines = lines.filter((l) => l.lotteryId === lotteryId && l.status === SaleStatus.active);
+      const lottery = lotteryLines[0].lottery;
+      const rectoDosCifras = [1, 2, 3].map(
+        (position) =>
+          Number(
+            payoutMultipliers.find(
+              (m) => m.lotteryId === lotteryId && m.digitCount === 2 && m.position === position && m.matchType === 'ultimas',
+            )?.multiplier ?? 0,
+          ),
+      );
+      const tripleMultiplier = Number(
+        payoutMultipliers.find((m) => m.lotteryId === lotteryId && m.digitCount === 3 && m.position === 1 && m.matchType === 'ultimas')
+          ?.multiplier ?? 0,
+      );
+      const paletTiers = (['mayor', 'medio', 'menor'] as const).map(
+        (tier) => Number(paletMultipliers.find((m) => m.lotteryId === lotteryId && m.tier === tier)?.multiplier ?? 0),
+      );
+
+      return {
+        lotteryId,
+        lotteryName: lottery.name,
+        subtotal: lotteryLines.reduce((sum, l) => sum + Number(l.amount), 0),
+        lines: lotteryLines.map((l) => ({ id: l.id, numberPlayed: l.numberPlayed, betType: l.betType, amount: Number(l.amount), status: l.status })),
+        multipliers: { rectoDosCifras, tripleMultiplier, paletTiers },
+      };
+    });
+
+    return {
+      batchId,
+      ticketCode: first.ticketCode,
+      createdAt: first.createdAt,
+      sellerName: first.seller.name,
+      customerName: first.customerName,
+      customerPhone: first.customerPhone,
+      // "cancelled" solo si YA NO queda ninguna lotería activa en la venta (se canceló toda, o se
+      // fueron quitando una por una hasta no dejar ninguna); mientras quede al menos una, "active".
+      status: activeLotteryIds.length === 0 ? SaleStatus.cancelled : SaleStatus.active,
+      total: lotteries.reduce((sum, l) => sum + l.subtotal, 0),
+      lotteries,
+    };
+  }
+
+  // Lista agrupada para la pantalla "Ventas" del vendedor: una fila por venta (batchId), no por
+  // línea -- ver getBatch() para el detalle completo de una venta puntual.
+  async listMyBatches(sellerId: string) {
+    const lines = await this.prisma.sale.findMany({
+      where: { sellerId },
+      include: { lottery: true },
+      orderBy: { createdAt: 'desc' },
+      take: 500, // TODO(sales): paginar cuando el historial crezca
+    });
+
+    const byBatch = new Map<string, typeof lines>();
+    for (const line of lines) {
+      const group = byBatch.get(line.batchId);
+      if (group) group.push(line);
+      else byBatch.set(line.batchId, [line]);
+    }
+
+    return [...byBatch.entries()].map(([batchId, batchLines]) => {
+      const first = batchLines[0];
+      // Igual que en getBatch(): una lotería quitada de la venta no debe seguir contando en el
+      // total ni en el resumen de loterías de esta fila.
+      const activeLines = batchLines.filter((l) => l.status === SaleStatus.active);
+      return {
+        batchId,
+        ticketCode: first.ticketCode,
+        createdAt: first.createdAt,
+        customerName: first.customerName,
+        total: activeLines.reduce((sum, l) => sum + Number(l.amount), 0),
+        status: activeLines.length === 0 ? SaleStatus.cancelled : SaleStatus.active,
+        lotteryNames: [...new Set(activeLines.map((l) => l.lottery.name))],
+      };
+    });
+  }
+
+  // Cancela TODAS las líneas activas de una venta agrupada en un solo movimiento (todo o nada) --
+  // ya no se cancela línea por línea. Un vendedor solo puede cancelar mientras todas las loterías
+  // de la venta sigan abiertas; admin/super pueden cancelar aunque ya hayan cerrado (igual que el
+  // cancelByAdmin de una sola línea).
+  async cancelBatch(batchId: string, requesterId: string, reason: string, isPrivileged: boolean) {
+    const lines = await this.prisma.sale.findMany({
+      where: { batchId, status: SaleStatus.active },
+      include: { lottery: true },
+    });
+    if (lines.length === 0) throw new NotFoundException('Venta no encontrada o ya está cancelada');
+    if (!isPrivileged && lines[0].sellerId !== requesterId) {
+      throw new ForbiddenException('No puedes cancelar ventas de otro vendedor');
+    }
+
+    if (!isPrivileged) {
+      for (const lotteryId of new Set(lines.map((l) => l.lotteryId))) {
+        const isOpen = await this.closures.isLotteryOpen(lotteryId);
+        if (!isOpen) {
+          const lottery = lines.find((l) => l.lotteryId === lotteryId)!.lottery;
+          throw new ForbiddenException(`No se puede cancelar: ${lottery.name} ya cerró`);
+        }
+      }
+    }
+
+    await this.prisma.sale.updateMany({
+      where: { batchId, status: SaleStatus.active },
+      data: { status: SaleStatus.cancelled, cancelledAt: new Date(), cancelledById: requesterId, cancelReason: reason },
+    });
+
+    return { batchId, cancelled: lines.length };
+  }
+
+  // Agrega una lotería a una venta ya creada, replicando el mismo carrito (números/tipos/montos)
+  // que ya juega en las demás loterías del lote -- evita tener que cancelar todo y rehacer la
+  // captura solo para sumar una lotería más. Todo o nada, misma validación que createOne.
+  async addLotteryToBatch(batchId: string, lotteryId: string, requesterId: string, isPrivileged: boolean) {
+    const lines = await this.prisma.sale.findMany({ where: { batchId, status: SaleStatus.active } });
+    if (lines.length === 0) throw new NotFoundException('Venta no encontrada o ya está cancelada');
+    if (!isPrivileged && lines[0].sellerId !== requesterId) {
+      throw new ForbiddenException('No puedes modificar ventas de otro vendedor');
+    }
+    if (lines.some((l) => l.lotteryId === lotteryId)) {
+      throw new BadRequestException('Esa lotería ya está en la venta');
+    }
+
+    const { sellerId, ticketCode, customerName, customerPhone } = lines[0];
+    const cartLines = lines.filter((l) => l.lotteryId === lines[0].lotteryId);
+
+    const lottery = (await this.prisma.lottery.findUnique({ where: { id: lotteryId } })) ?? undefined;
+    const isOpen = await this.closures.isLotteryOpen(lotteryId);
+    const blockedNumbers = await this.prisma.blockedNumber.findMany({
+      where: { lotteryId, number: { in: cartLines.map((l) => l.numberPlayed) } },
+    });
+    const blockedSet = new Set(blockedNumbers.map((b) => b.number));
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        const created = [];
+        for (const line of cartLines) {
+          created.push(
+            await this.createOne(
+              tx,
+              sellerId,
+              {
+                lotteryId,
+                numberPlayed: line.numberPlayed,
+                amount: Number(line.amount),
+                betType: line.betType,
+                customerName: customerName ?? undefined,
+                customerPhone: customerPhone ?? undefined,
+                batchId,
+                ticketCode,
+              },
+              { lottery, isOpen, isBlocked: blockedSet.has(line.numberPlayed) },
+            ),
+          );
+        }
+        return created;
+      },
+      { timeout: 15_000 },
+    );
+  }
+
+  // Quita una lotería de una venta agrupada (cancela solo sus líneas). No permite dejar la venta
+  // sin ninguna lotería -- para eso está cancelar la venta completa.
+  async removeLotteryFromBatch(batchId: string, lotteryId: string, requesterId: string, isPrivileged: boolean) {
+    const allLines = await this.prisma.sale.findMany({
+      where: { batchId, status: SaleStatus.active },
+      include: { lottery: true },
+    });
+    if (allLines.length === 0) throw new NotFoundException('Venta no encontrada o ya está cancelada');
+    if (!isPrivileged && allLines[0].sellerId !== requesterId) {
+      throw new ForbiddenException('No puedes modificar ventas de otro vendedor');
+    }
+
+    const targetLines = allLines.filter((l) => l.lotteryId === lotteryId);
+    if (targetLines.length === 0) throw new NotFoundException('Esa lotería no está en la venta');
+
+    const remaining = allLines.filter((l) => l.lotteryId !== lotteryId);
+    if (remaining.length === 0) {
+      throw new BadRequestException('No puedes quitar la única lotería de la venta -- cancela la venta completa en su lugar');
+    }
+
+    if (!isPrivileged) {
+      const isOpen = await this.closures.isLotteryOpen(lotteryId);
+      if (!isOpen) throw new ForbiddenException(`No se puede quitar: ${targetLines[0].lottery.name} ya cerró`);
+    }
+
+    await this.prisma.sale.updateMany({
+      where: { batchId, lotteryId, status: SaleStatus.active },
+      data: { status: SaleStatus.cancelled, cancelledAt: new Date(), cancelledById: requesterId, cancelReason: 'Lotería removida de la venta' },
+    });
+
+    return { batchId, lotteryId, removed: targetLines.length };
+  }
+
+  // Cancelación por el propio vendedor de una sola línea: solo permitida antes del cierre.
+  // TODO(sales): la UI de Ventas ahora cancela por venta agrupada (ver cancelBatch); este
+  // endpoint por línea se conserva por compatibilidad pero ya no lo usa la pantalla principal.
   async cancelBySeller(id: string, sellerId: string, reason: string) {
     const sale = await this.getOrThrow(id);
     if (sale.sellerId !== sellerId) throw new ForbiddenException('No puedes cancelar ventas de otro vendedor');
@@ -260,4 +496,10 @@ function dayBoundsInPanama(date?: string): { gte: Date; lt: Date } {
 function todayInPanama(): string {
   // Locale en-CA formatea como YYYY-MM-DD, cómodo para construir la fecha de vuelta.
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Panama' }).format(new Date());
+}
+
+// Código corto compartido por todas las líneas de una misma venta (lo que ve el cliente en el
+// recibo) -- no necesita ser único a nivel de BD, la identidad real de la venta es batchId.
+function generateTicketCode(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
 }

@@ -250,6 +250,11 @@ model LotteryScheduleChange {
 
 model Sale {
   id            String     @id @default(uuid())
+  // Todas las líneas generadas por un mismo "Procesar" (una o varias loterías x tipos de
+  // apuesta) comparten un batchId -- es la "venta" que ve el vendedor/cliente como una sola
+  // unidad (un recibo, un código, una cancelación), aunque por debajo siga habiendo una fila
+  // por lotería x tipo de apuesta (necesario para el cálculo de premios por separado).
+  batchId       String     @default(uuid()) @map("batch_id")
   sellerId      String     @map("seller_id")
   seller        User       @relation("SellerSales", fields: [sellerId], references: [id])
   lotteryId     String     @map("lottery_id")
@@ -261,7 +266,9 @@ model Sale {
   // el cliente reclama un premio.
   customerName  String?    @map("customer_name")
   customerPhone String?    @map("customer_phone")
-  ticketCode    String     @unique @map("ticket_code")
+  // Código corto compartido por todas las líneas del mismo batchId (lo que ve el cliente en el
+  // recibo, ej. "382520") -- ya no es único por fila individual, la identidad real es batchId.
+  ticketCode    String     @map("ticket_code")
   status        SaleStatus @default(active)
 
   createdAt     DateTime  @default(now()) @map("created_at")
@@ -276,6 +283,7 @@ model Sale {
 
   @@index([sellerId, createdAt])
   @@index([lotteryId, createdAt])
+  @@index([batchId])
   @@map("sales")
 }
 

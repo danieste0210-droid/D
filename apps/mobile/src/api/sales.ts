@@ -9,6 +9,7 @@ export type BetType = 'recto' | 'combinado' | 'palet';
 
 export interface Sale {
   id: string;
+  batchId: string;
   sellerId: string;
   lotteryId: string;
   numberPlayed: string;
@@ -19,6 +20,50 @@ export interface Sale {
   ticketCode: string;
   status: SaleStatus;
   createdAt: string;
+}
+
+// Recibo/visor de una venta agrupada -- todas las líneas de un mismo batchId (una o varias
+// loterías x tipos de apuesta) que el vendedor procesó juntas en un solo "Procesar".
+export interface SaleBatchLine {
+  id: string;
+  numberPlayed: string;
+  betType: BetType;
+  amount: number;
+  status: SaleStatus;
+}
+
+export interface SaleBatchLottery {
+  lotteryId: string;
+  lotteryName: string;
+  subtotal: number;
+  lines: SaleBatchLine[];
+  multipliers: {
+    rectoDosCifras: [number, number, number];
+    tripleMultiplier: number;
+    paletTiers: [number, number, number];
+  };
+}
+
+export interface SaleBatchDetail {
+  batchId: string;
+  ticketCode: string;
+  createdAt: string;
+  sellerName: string;
+  customerName: string | null;
+  customerPhone: string | null;
+  status: 'active' | 'cancelled';
+  total: number;
+  lotteries: SaleBatchLottery[];
+}
+
+export interface SaleBatchSummary {
+  batchId: string;
+  ticketCode: string;
+  createdAt: string;
+  customerName: string | null;
+  total: number;
+  status: 'active' | 'cancelled';
+  lotteryNames: string[];
 }
 
 export interface CreateSalePayload {
@@ -76,6 +121,30 @@ export function adminCancelSale(id: string, reason: string): Promise<Sale> {
 
 export function getLastSale(date?: string): Promise<Sale | null> {
   return apiFetch<Sale | null>(endpoints.sales.lastSale(date));
+}
+
+// "Ventas": una fila por venta agrupada (batchId), no por línea individual.
+export function listMySaleBatches(): Promise<SaleBatchSummary[]> {
+  return apiFetch<SaleBatchSummary[]>(endpoints.sales.myBatches);
+}
+
+export function getSaleBatch(batchId: string): Promise<SaleBatchDetail> {
+  return apiFetch<SaleBatchDetail>(endpoints.sales.batch(batchId));
+}
+
+// Cancela TODAS las líneas activas de la venta agrupada de una vez.
+export function cancelSaleBatch(batchId: string, reason: string): Promise<{ batchId: string; cancelled: number }> {
+  return apiFetch(endpoints.sales.batch(batchId), { method: 'DELETE', body: JSON.stringify({ reason }) });
+}
+
+// Agrega una lotería a una venta ya creada, jugando el mismo carrito que ya tiene el lote.
+export function addLotteryToBatch(batchId: string, lotteryId: string): Promise<Sale[]> {
+  return apiFetch<Sale[]>(endpoints.sales.batchLotteries(batchId), { method: 'POST', body: JSON.stringify({ lotteryId }) });
+}
+
+// Quita una lotería de una venta agrupada (cancela solo sus líneas).
+export function removeLotteryFromBatch(batchId: string, lotteryId: string): Promise<{ batchId: string; lotteryId: string; removed: number }> {
+  return apiFetch(endpoints.sales.batchLottery(batchId, lotteryId), { method: 'DELETE' });
 }
 
 export { ApiError };

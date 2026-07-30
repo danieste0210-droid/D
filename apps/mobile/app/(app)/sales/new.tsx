@@ -145,7 +145,8 @@ export default function NewSaleScreen() {
         items,
       });
       tryPrintAll(sales);
-      router.back();
+      // Todas las líneas comparten un batchId -- el recibo es el único visor de "una sola venta".
+      router.replace({ pathname: '/(app)/sales/receipt', params: { batchId: sales[0].batchId } });
     } catch (err) {
       setError(getErrorMessage(err, 'No se pudo procesar el carrito (revisa conexión y horarios de cierre)'));
     }

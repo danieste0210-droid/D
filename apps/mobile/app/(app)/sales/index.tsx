@@ -1,73 +1,69 @@
 import { useState } from 'react';
 import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
-import { ActivityIndicator, Button, FAB, HelperText, Modal, Portal, Text, TextInput } from 'react-native-paper';
+import { ActivityIndicator, Button, FAB, HelperText, Modal, Portal, Text, TextInput, TouchableRipple } from 'react-native-paper';
 import { router } from 'expo-router';
 import { colors } from '@/theme/colors';
-import { useCancelSale, useMySales } from '@/features/sales/hooks';
-import type { Sale } from '@/api/sales';
+import { useCancelSaleBatch, useMySaleBatches } from '@/features/sales/hooks';
+import { getErrorMessage } from '@/api/client';
+import type { SaleBatchSummary } from '@/api/sales';
 
-const STATUS_LABEL: Record<Sale['status'], string> = {
+const STATUS_LABEL: Record<SaleBatchSummary['status'], string> = {
   active: 'Activa',
   cancelled: 'Cancelada',
-  paid: 'Pagada',
 };
 
-const BET_TYPE_LABEL: Record<Sale['betType'], string> = {
-  recto: 'Recto',
-  combinado: 'Combinado',
-  palet: 'Palet',
-};
-
-function SaleRow({ sale, onCancel }: { sale: Sale; onCancel: (sale: Sale) => void }) {
+function BatchRow({ batch, onOpen, onCancel }: { batch: SaleBatchSummary; onOpen: () => void; onCancel: () => void }) {
   return (
-    <View style={styles.row}>
-      <View style={{ flex: 1 }}>
-        <Text variant="titleMedium">
-          #{sale.numberPlayed}
-          {sale.betType !== 'recto' ? ` · ${BET_TYPE_LABEL[sale.betType]}` : ''}
-        </Text>
-        <Text variant="bodySmall" style={styles.muted}>
-          {new Date(sale.createdAt).toLocaleString('es-PA')}
-        </Text>
+    <TouchableRipple onPress={onOpen}>
+      <View style={styles.row}>
+        <View style={{ flex: 1 }}>
+          <Text variant="titleMedium">#{batch.ticketCode}</Text>
+          <Text variant="bodySmall" style={styles.muted}>
+            {batch.lotteryNames.join(', ') || '(sin loterías)'}
+          </Text>
+          <Text variant="bodySmall" style={styles.muted}>
+            {new Date(batch.createdAt).toLocaleString('es-PA')}
+          </Text>
+        </View>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text variant="titleMedium">${batch.total.toFixed(2)}</Text>
+          <Text variant="bodySmall" style={styles.muted}>
+            {STATUS_LABEL[batch.status]}
+          </Text>
+          {batch.status === 'active' && (
+            <Button compact onPress={onCancel} textColor={colors.danger} style={{ marginTop: 4 }}>
+              Cancelar
+            </Button>
+          )}
+        </View>
       </View>
-      <View style={{ alignItems: 'flex-end' }}>
-        <Text variant="titleMedium">${Number(sale.amount).toFixed(2)}</Text>
-        <Text variant="bodySmall" style={styles.muted}>
-          {STATUS_LABEL[sale.status]}
-        </Text>
-        {sale.status === 'active' && (
-          <Button compact onPress={() => onCancel(sale)} textColor={colors.danger} style={{ marginTop: 4 }}>
-            Cancelar
-          </Button>
-        )}
-      </View>
-    </View>
+    </TouchableRipple>
   );
 }
 
-// TODO(sales/index): pull del historial completo con paginación cuando crezca.
+// "Ventas": una sola fila por venta agrupada (batchId) -- una venta puede jugar varias loterías
+// x tipos de apuesta a la vez, pero para el vendedor sigue siendo UN solo recibo/código/ID.
 export default function SalesListScreen() {
-  const { data: sales, isLoading, isRefetching, refetch } = useMySales();
-  const cancelSale = useCancelSale();
+  const { data: batches, isLoading, isRefetching, refetch } = useMySaleBatches();
+  const cancelBatch = useCancelSaleBatch();
 
-  const [saleToCancel, setSaleToCancel] = useState<Sale | null>(null);
+  const [batchToCancel, setBatchToCancel] = useState<SaleBatchSummary | null>(null);
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const closeModal = () => {
-    setSaleToCancel(null);
+    setBatchToCancel(null);
     setReason('');
     setError(null);
   };
 
   const handleConfirmCancel = async () => {
-    if (!saleToCancel || reason.trim().length < 3) return;
+    if (!batchToCancel || reason.trim().length < 3) return;
     try {
-      await cancelSale.mutateAsync({ id: saleToCancel.id, reason: reason.trim() });
+      await cancelBatch.mutateAsync({ batchId: batchToCancel.batchId, reason: reason.trim() });
       closeModal();
-    } catch {
-      // El servidor rechaza la cancelación si la lotería ya cerró -- ver sales.service.cancelBySeller.
-      setError('No se pudo cancelar (¿la lotería ya cerró?)');
+    } catch (err) {
+      setError(getErrorMessage(err, 'No se pudo cancelar (¿alguna lotería ya cerró?)'));
     }
   };
 
@@ -77,11 +73,17 @@ export default function SalesListScreen() {
         <ActivityIndicator style={styles.loading} color={colors.brand} />
       ) : (
         <FlatList
-          data={sales ?? []}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <SaleRow sale={item} onCancel={setSaleToCancel} />}
+          data={batches ?? []}
+          keyExtractor={(item) => item.batchId}
+          renderItem={({ item }) => (
+            <BatchRow
+              batch={item}
+              onOpen={() => router.push({ pathname: '/(app)/sales/receipt', params: { batchId: item.batchId } })}
+              onCancel={() => setBatchToCancel(item)}
+            />
+          )}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
-          contentContainerStyle={sales?.length ? undefined : styles.emptyContainer}
+          contentContainerStyle={batches?.length ? undefined : styles.emptyContainer}
           ListEmptyComponent={<Text style={styles.muted}>Todavía no hay ventas registradas</Text>}
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} colors={[colors.brand]} />}
         />
@@ -95,19 +97,19 @@ export default function SalesListScreen() {
       />
 
       <Portal>
-        <Modal visible={!!saleToCancel} onDismiss={closeModal} contentContainerStyle={styles.modal}>
+        <Modal visible={!!batchToCancel} onDismiss={closeModal} contentContainerStyle={styles.modal}>
           <Text variant="titleMedium" style={{ marginBottom: 4 }}>
-            Cancelar venta #{saleToCancel?.numberPlayed}
+            Cancelar venta #{batchToCancel?.ticketCode}
           </Text>
           <Text variant="bodySmall" style={[styles.muted, { marginBottom: 16 }]}>
-            Esta acción queda registrada en el log de auditoría.
+            Cancela TODAS las loterías de esta venta a la vez. Esta acción queda registrada en el log de auditoría.
           </Text>
           <TextInput label="Motivo" value={reason} onChangeText={setReason} multiline style={styles.field} />
           {error && <HelperText type="error">{error}</HelperText>}
           <Button
             mode="contained"
             onPress={handleConfirmCancel}
-            loading={cancelSale.isPending}
+            loading={cancelBatch.isPending}
             disabled={reason.trim().length < 3}
             buttonColor={colors.danger}
           >

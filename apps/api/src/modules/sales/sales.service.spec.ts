@@ -1,16 +1,57 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { SalesService } from './sales.service';
 
 const OPEN_LOTTERY = { id: 'lottery-1', name: 'Chance Demo', active: true, blocked: false, maxAmountPerNumber: null };
 
-function buildService(overrides: { lotteries?: Record<string, any>; blockedNumbers?: Record<string, any>; isOpen?: boolean } = {}) {
+function buildService(
+  overrides: {
+    lotteries?: Record<string, any>;
+    blockedNumbers?: Record<string, any>;
+    isOpen?: boolean;
+    isOpenByLottery?: Record<string, boolean>;
+    sales?: any[];
+    payoutMultipliers?: any[];
+    paletMultipliers?: any[];
+  } = {},
+) {
   const lotteries = overrides.lotteries ?? { 'lottery-1': OPEN_LOTTERY };
   const blockedNumbers = overrides.blockedNumbers ?? {};
   const isOpen = overrides.isOpen ?? true;
+  const isOpenByLottery = overrides.isOpenByLottery ?? {};
+  // Clonar cada fila (no solo el array) -- cancelBatch/removeLotteryFromBatch mutan las filas in
+  // place vía Object.assign, y varios tests reutilizan el mismo array de fixtures const.
+  const salesStore: any[] = overrides.sales ? overrides.sales.map((s) => ({ ...s })) : [];
 
-  const saleCreate = jest.fn((args: any) => Promise.resolve({ id: `sale-${Math.random()}`, ...args.data }));
+  const saleCreate = jest.fn((args: any) => {
+    const row = { id: `sale-${salesStore.length}-${Math.random()}`, status: 'active', createdAt: new Date(), ...args.data };
+    salesStore.push(row);
+    return Promise.resolve(row);
+  });
   const saleAggregate = jest.fn().mockResolvedValue({ _sum: { amount: null } });
   const saleFindFirst = jest.fn().mockResolvedValue(null);
+  const saleFindMany = jest.fn(({ where, include }: any) => {
+    let rows = salesStore.filter((r) => {
+      if (where?.batchId && r.batchId !== where.batchId) return false;
+      if (where?.sellerId && r.sellerId !== where.sellerId) return false;
+      if (where?.lotteryId && r.lotteryId !== where.lotteryId) return false;
+      if (where?.status && r.status !== where.status) return false;
+      return true;
+    });
+    if (include?.lottery) rows = rows.map((r) => ({ ...r, lottery: lotteries[r.lotteryId] }));
+    if (include?.seller) rows = rows.map((r) => ({ ...r, seller: { id: r.sellerId, name: 'Vendedor Test' } }));
+    return Promise.resolve(rows);
+  });
+  const saleUpdateMany = jest.fn(({ where, data }: any) => {
+    let count = 0;
+    for (const row of salesStore) {
+      if (where?.batchId && row.batchId !== where.batchId) continue;
+      if (where?.lotteryId && row.lotteryId !== where.lotteryId) continue;
+      if (where?.status && row.status !== where.status) continue;
+      Object.assign(row, data);
+      count++;
+    }
+    return Promise.resolve({ count });
+  });
 
   const client = {
     lottery: {
@@ -21,17 +62,21 @@ function buildService(overrides: { lotteries?: Record<string, any>; blockedNumbe
       findUnique: jest.fn(({ where }: any) =>
         Promise.resolve(blockedNumbers[`${where.lotteryId_number.lotteryId}-${where.lotteryId_number.number}`] ?? null),
       ),
-      findMany: jest.fn(({ where }: any) =>
-        Promise.resolve(
-          where.lotteryId.in.flatMap((lotteryId: string) =>
-            where.number.in
-              .filter((number: string) => blockedNumbers[`${lotteryId}-${number}`])
-              .map((number: string) => ({ ...blockedNumbers[`${lotteryId}-${number}`], lotteryId, number })),
+      findMany: jest.fn(({ where }: any) => {
+        const lotteryIds: string[] = where.lotteryId?.in ?? [where.lotteryId];
+        const numbers: string[] = where.number?.in ?? [where.number];
+        return Promise.resolve(
+          lotteryIds.flatMap((lotteryId) =>
+            numbers
+              .filter((number) => blockedNumbers[`${lotteryId}-${number}`])
+              .map((number) => ({ ...blockedNumbers[`${lotteryId}-${number}`], lotteryId, number })),
           ),
-        ),
-      ),
+        );
+      }),
     },
-    sale: { create: saleCreate, aggregate: saleAggregate, findFirst: saleFindFirst },
+    sale: { create: saleCreate, aggregate: saleAggregate, findFirst: saleFindFirst, findMany: saleFindMany, updateMany: saleUpdateMany },
+    payoutMultiplier: { findMany: jest.fn().mockResolvedValue(overrides.payoutMultipliers ?? []) },
+    paletMultiplier: { findMany: jest.fn().mockResolvedValue(overrides.paletMultipliers ?? []) },
   };
 
   const prisma = {
@@ -39,10 +84,10 @@ function buildService(overrides: { lotteries?: Record<string, any>; blockedNumbe
     $transaction: jest.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(client)),
   };
 
-  const closures = { isLotteryOpen: jest.fn().mockResolvedValue(isOpen) };
+  const closures = { isLotteryOpen: jest.fn((lotteryId: string) => Promise.resolve(isOpenByLottery[lotteryId] ?? isOpen)) };
 
   const service = new SalesService(prisma as any, closures as any);
-  return { service, prisma, closures, saleCreate, saleAggregate, saleFindFirst };
+  return { service, prisma, closures, saleCreate, saleAggregate, saleFindFirst, saleFindMany, saleUpdateMany, salesStore };
 }
 
 describe('SalesService.create', () => {
@@ -166,6 +211,175 @@ describe('SalesService.createBatch', () => {
     for (const lotteryId of ['lottery-1', 'lottery-2', 'lottery-3']) {
       expect(saleCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ lotteryId, numberPlayed: '77', amount: 1 }) });
     }
+  });
+});
+
+describe('SalesService.getBatch', () => {
+  const seedSales = [
+    { id: 's1', batchId: 'batch-1', sellerId: 'seller-1', lotteryId: 'lottery-1', numberPlayed: '34', amount: 2, betType: 'recto', status: 'active', ticketCode: '111111', customerName: null, customerPhone: null, createdAt: new Date('2026-01-01') },
+    { id: 's2', batchId: 'batch-1', sellerId: 'seller-1', lotteryId: 'lottery-2', numberPlayed: '34', amount: 2, betType: 'recto', status: 'active', ticketCode: '111111', customerName: null, customerPhone: null, createdAt: new Date('2026-01-01') },
+  ];
+
+  it('agrupa las líneas por lotería y calcula el total de la venta', async () => {
+    const { service } = buildService({
+      lotteries: { 'lottery-1': OPEN_LOTTERY, 'lottery-2': { ...OPEN_LOTTERY, id: 'lottery-2', name: 'Otra' } },
+      sales: seedSales,
+    });
+
+    const batch = await service.getBatch('batch-1', 'seller-1', false);
+
+    expect(batch.total).toBe(4);
+    expect(batch.status).toBe('active');
+    expect(batch.lotteries).toHaveLength(2);
+    expect(batch.lotteries.map((l) => l.lotteryName).sort()).toEqual(['Chance Demo', 'Otra']);
+  });
+
+  it('lanza NotFoundException si el batchId no existe', async () => {
+    const { service } = buildService({ sales: [] });
+
+    await expect(service.getBatch('no-existe', 'seller-1', false)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('rechaza ver la venta de otro vendedor si no es admin/super', async () => {
+    const { service } = buildService({ sales: seedSales });
+
+    await expect(service.getBatch('batch-1', 'otro-vendedor', false)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('admin/super sí puede ver la venta de otro vendedor', async () => {
+    const { service } = buildService({
+      lotteries: { 'lottery-1': OPEN_LOTTERY, 'lottery-2': { ...OPEN_LOTTERY, id: 'lottery-2', name: 'Otra' } },
+      sales: seedSales,
+    });
+
+    await expect(service.getBatch('batch-1', 'otro-vendedor', true)).resolves.toBeDefined();
+  });
+});
+
+describe('SalesService.listMyBatches', () => {
+  it('agrupa las ventas del vendedor por batchId, ignorando las de otros', async () => {
+    const { service } = buildService({
+      sales: [
+        { id: 's1', batchId: 'batch-1', sellerId: 'seller-1', lotteryId: 'lottery-1', numberPlayed: '34', amount: 2, betType: 'recto', status: 'active', ticketCode: '111111', customerName: null, createdAt: new Date() },
+        { id: 's2', batchId: 'batch-1', sellerId: 'seller-1', lotteryId: 'lottery-1', numberPlayed: '35', amount: 3, betType: 'recto', status: 'active', ticketCode: '111111', customerName: null, createdAt: new Date() },
+        { id: 's3', batchId: 'batch-2', sellerId: 'otro-vendedor', lotteryId: 'lottery-1', numberPlayed: '36', amount: 1, betType: 'recto', status: 'active', ticketCode: '222222', customerName: null, createdAt: new Date() },
+      ],
+    });
+
+    const batches = await service.listMyBatches('seller-1');
+
+    expect(batches).toHaveLength(1);
+    expect(batches[0].batchId).toBe('batch-1');
+    expect(batches[0].total).toBe(5);
+  });
+});
+
+describe('SalesService.cancelBatch', () => {
+  const seedSales = [
+    { id: 's1', batchId: 'batch-1', sellerId: 'seller-1', lotteryId: 'lottery-1', numberPlayed: '34', amount: 2, betType: 'recto', status: 'active', ticketCode: '111111', createdAt: new Date() },
+    { id: 's2', batchId: 'batch-1', sellerId: 'seller-1', lotteryId: 'lottery-2', numberPlayed: '34', amount: 2, betType: 'recto', status: 'active', ticketCode: '111111', createdAt: new Date() },
+  ];
+
+  it('cancela todas las líneas activas del lote de una vez', async () => {
+    const { service, salesStore } = buildService({
+      lotteries: { 'lottery-1': OPEN_LOTTERY, 'lottery-2': { ...OPEN_LOTTERY, id: 'lottery-2' } },
+      sales: seedSales,
+    });
+
+    const result = await service.cancelBatch('batch-1', 'seller-1', 'cliente se arrepintió', false);
+
+    expect(result.cancelled).toBe(2);
+    expect(salesStore.every((s) => s.status === 'cancelled')).toBe(true);
+  });
+
+  it('lanza NotFoundException si ya no hay líneas activas en el lote', async () => {
+    const { service } = buildService({ sales: [] });
+
+    await expect(service.cancelBatch('batch-1', 'seller-1', 'motivo', false)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('un vendedor no puede cancelar si alguna lotería del lote ya cerró', async () => {
+    const { service } = buildService({
+      lotteries: { 'lottery-1': OPEN_LOTTERY, 'lottery-2': { ...OPEN_LOTTERY, id: 'lottery-2' } },
+      sales: seedSales,
+      isOpenByLottery: { 'lottery-1': true, 'lottery-2': false },
+    });
+
+    await expect(service.cancelBatch('batch-1', 'seller-1', 'motivo', false)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('admin/super puede cancelar aunque alguna lotería ya haya cerrado', async () => {
+    const { service, salesStore } = buildService({
+      lotteries: { 'lottery-1': OPEN_LOTTERY, 'lottery-2': { ...OPEN_LOTTERY, id: 'lottery-2' } },
+      sales: seedSales,
+      isOpenByLottery: { 'lottery-1': true, 'lottery-2': false },
+    });
+
+    const result = await service.cancelBatch('batch-1', 'admin-1', 'motivo', true);
+
+    expect(result.cancelled).toBe(2);
+    expect(salesStore.every((s) => s.status === 'cancelled')).toBe(true);
+  });
+});
+
+describe('SalesService.addLotteryToBatch', () => {
+  it('replica el mismo carrito de la venta en la lotería nueva', async () => {
+    const { service, saleCreate } = buildService({
+      lotteries: { 'lottery-1': OPEN_LOTTERY, 'lottery-2': { ...OPEN_LOTTERY, id: 'lottery-2', name: 'Nueva' } },
+      sales: [
+        { id: 's1', batchId: 'batch-1', sellerId: 'seller-1', lotteryId: 'lottery-1', numberPlayed: '34', amount: 2, betType: 'recto', status: 'active', ticketCode: '111111', customerName: 'Juan', customerPhone: null, createdAt: new Date() },
+        { id: 's2', batchId: 'batch-1', sellerId: 'seller-1', lotteryId: 'lottery-1', numberPlayed: '345', amount: 1, betType: 'combinado', status: 'active', ticketCode: '111111', customerName: 'Juan', customerPhone: null, createdAt: new Date() },
+      ],
+    });
+
+    const created = await service.addLotteryToBatch('batch-1', 'lottery-2', 'seller-1', false);
+
+    expect(created).toHaveLength(2);
+    expect(saleCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ lotteryId: 'lottery-2', betType: 'recto', amount: 2, batchId: 'batch-1', ticketCode: '111111' }),
+    });
+    expect(saleCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ lotteryId: 'lottery-2', betType: 'combinado', amount: 1 }),
+    });
+  });
+
+  it('rechaza si la lotería ya está en la venta', async () => {
+    const { service } = buildService({
+      sales: [
+        { id: 's1', batchId: 'batch-1', sellerId: 'seller-1', lotteryId: 'lottery-1', numberPlayed: '34', amount: 2, betType: 'recto', status: 'active', ticketCode: '111111', createdAt: new Date() },
+      ],
+    });
+
+    await expect(service.addLotteryToBatch('batch-1', 'lottery-1', 'seller-1', false)).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('SalesService.removeLotteryFromBatch', () => {
+  const seedSales = [
+    { id: 's1', batchId: 'batch-1', sellerId: 'seller-1', lotteryId: 'lottery-1', numberPlayed: '34', amount: 2, betType: 'recto', status: 'active', ticketCode: '111111', createdAt: new Date() },
+    { id: 's2', batchId: 'batch-1', sellerId: 'seller-1', lotteryId: 'lottery-2', numberPlayed: '34', amount: 2, betType: 'recto', status: 'active', ticketCode: '111111', createdAt: new Date() },
+  ];
+
+  it('cancela solo las líneas de la lotería indicada', async () => {
+    const { service, salesStore } = buildService({
+      lotteries: { 'lottery-1': OPEN_LOTTERY, 'lottery-2': { ...OPEN_LOTTERY, id: 'lottery-2' } },
+      sales: seedSales,
+    });
+
+    const result = await service.removeLotteryFromBatch('batch-1', 'lottery-2', 'seller-1', false);
+
+    expect(result.removed).toBe(1);
+    expect(salesStore.find((s) => s.id === 's1')!.status).toBe('active');
+    expect(salesStore.find((s) => s.id === 's2')!.status).toBe('cancelled');
+  });
+
+  it('no permite quitar la única lotería restante de la venta', async () => {
+    const { service } = buildService({
+      lotteries: { 'lottery-1': OPEN_LOTTERY },
+      sales: [seedSales[0]],
+    });
+
+    await expect(service.removeLotteryFromBatch('batch-1', 'lottery-1', 'seller-1', false)).rejects.toBeInstanceOf(BadRequestException);
   });
 });
 
