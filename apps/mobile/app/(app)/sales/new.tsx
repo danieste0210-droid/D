@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { FlatList, ScrollView, StyleSheet, View } from 'react-native';
-import { Button, Checkbox, HelperText, IconButton, Snackbar, Text, TextInput } from 'react-native-paper';
+import { Button, Checkbox, HelperText, IconButton, SegmentedButtons, Snackbar, Text, TextInput } from 'react-native-paper';
 import { router } from 'expo-router';
 import { colors } from '@/theme/colors';
 import { useAuthStore } from '@/state/authStore';
@@ -14,6 +14,10 @@ import { printTicket } from '@/printing/blePrinter';
 import { buildSaleTicket } from '@/printing/escpos';
 
 const DAY_LABELS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
+type AmountUnit = 'plata' | 'viles';
+// 1 vil = $0.25 (4 viles = $1) -- unidad menor en la que algunos vendedores prefieren apostar.
+const VILE_VALUE = 0.25;
 
 interface CartEntry {
   id: string;
@@ -34,6 +38,14 @@ function parseAmount(raw: string): number | undefined {
   return Number.isNaN(value) || value <= 0 ? undefined : value;
 }
 
+// El carrito y el backend siempre trabajan en dólares -- en modo "viles" el vendedor escribe
+// la cantidad de viles y aquí se convierte a su equivalente en dólares antes de usarse.
+function toDollars(raw: string, unit: AmountUnit): number | undefined {
+  const value = parseAmount(raw);
+  if (value == null) return undefined;
+  return unit === 'viles' ? value * VILE_VALUE : value;
+}
+
 // "Números y Valores": asistente de 2 pasos. Paso 1 elige una o varias loterías abiertas hoy
 // (los mismos números se juegan en TODAS las seleccionadas). Paso 2 arma un carrito: cada número
 // puede jugarse recto, combinado y/o palet a la vez -- cada monto presente genera su propia venta.
@@ -49,6 +61,7 @@ export default function NewSaleScreen() {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [numberPlayed, setNumberPlayed] = useState('');
+  const [unit, setUnit] = useState<AmountUnit>('plata');
   const [rectoValue, setRectoValue] = useState('');
   const [combinadoValue, setCombinadoValue] = useState('');
   const [paletValue, setPaletValue] = useState('');
@@ -57,7 +70,7 @@ export default function NewSaleScreen() {
   const [snackbar, setSnackbar] = useState<string | null>(null);
 
   const selectedLotteries = (lotteries ?? []).filter((l: LotteryForDay) => selectedLotteryIds.includes(l.id));
-  const pendingTotal = (parseAmount(rectoValue) ?? 0) + (parseAmount(combinadoValue) ?? 0) + (parseAmount(paletValue) ?? 0);
+  const pendingTotal = (toDollars(rectoValue, unit) ?? 0) + (toDollars(combinadoValue, unit) ?? 0) + (toDollars(paletValue, unit) ?? 0);
   // El carrito se juega en TODAS las loterías seleccionadas -- el total a cobrar es el del
   // carrito multiplicado por la cantidad de loterías marcadas, no solo la suma del carrito.
   const cartTotal = cart.reduce((sum, item) => sum + item.amount, 0) * Math.max(selectedLotteryIds.length, 1);
@@ -68,9 +81,9 @@ export default function NewSaleScreen() {
 
   const handleSumar = () => {
     if (!numberPlayed.trim()) return;
-    const rectoAmount = parseAmount(rectoValue);
-    const combinadoAmount = parseAmount(combinadoValue);
-    const paletAmount = parseAmount(paletValue);
+    const rectoAmount = toDollars(rectoValue, unit);
+    const combinadoAmount = toDollars(combinadoValue, unit);
+    const paletAmount = toDollars(paletValue, unit);
     if (rectoAmount == null && combinadoAmount == null && paletAmount == null) return;
 
     const newEntries: CartEntry[] = [];
@@ -210,17 +223,45 @@ export default function NewSaleScreen() {
           <TextInput label="Teléfono" value={customerPhone} onChangeText={setCustomerPhone} keyboardType="phone-pad" style={[styles.field, { flex: 1 }]} />
         </View>
 
+        <SegmentedButtons
+          value={unit}
+          onValueChange={(v) => setUnit(v as AmountUnit)}
+          style={{ marginBottom: 12 }}
+          buttons={[
+            { value: 'plata', label: 'Plata' },
+            { value: 'viles', label: 'Viles (1 = $0.25)' },
+          ]}
+        />
+
         <View style={styles.fieldsRow}>
           <TextInput label="Número" value={numberPlayed} onChangeText={setNumberPlayed} keyboardType="number-pad" style={[styles.field, { flex: 1 }]} />
-          <TextInput label="$Valor" value={rectoValue} onChangeText={setRectoValue} keyboardType="decimal-pad" style={[styles.field, { flex: 1 }]} />
+          <TextInput
+            label={unit === 'viles' ? 'Valor (viles)' : '$Valor'}
+            value={rectoValue}
+            onChangeText={setRectoValue}
+            keyboardType="decimal-pad"
+            style={[styles.field, { flex: 1 }]}
+          />
         </View>
         <View style={styles.fieldsRow}>
-          <TextInput label="$Combinado" value={combinadoValue} onChangeText={setCombinadoValue} keyboardType="decimal-pad" style={[styles.field, { flex: 1 }]} />
-          <TextInput label="$Palet" value={paletValue} onChangeText={setPaletValue} keyboardType="decimal-pad" style={[styles.field, { flex: 1 }]} />
+          <TextInput
+            label={unit === 'viles' ? 'Combinado (viles)' : '$Combinado'}
+            value={combinadoValue}
+            onChangeText={setCombinadoValue}
+            keyboardType="decimal-pad"
+            style={[styles.field, { flex: 1 }]}
+          />
+          <TextInput
+            label={unit === 'viles' ? 'Palet (viles)' : '$Palet'}
+            value={paletValue}
+            onChangeText={setPaletValue}
+            keyboardType="decimal-pad"
+            style={[styles.field, { flex: 1 }]}
+          />
         </View>
 
         <Button mode="contained" onPress={handleSumar} disabled={!numberPlayed.trim() || pendingTotal <= 0} buttonColor={colors.brand} style={{ marginBottom: 16 }}>
-          Sumar — ${pendingTotal.toFixed(0)}
+          Sumar — ${pendingTotal.toFixed(2)}
         </Button>
 
         <FlatList
@@ -229,9 +270,9 @@ export default function NewSaleScreen() {
           renderItem={({ item }) => (
             <View style={styles.cartRow}>
               <Text style={styles.cartCell}>{item.numberPlayed}</Text>
-              <Text style={styles.cartCell}>{item.betType === 'recto' ? `$${item.amount}` : '-'}</Text>
-              <Text style={styles.cartCell}>{item.betType === 'combinado' ? `$${item.amount}` : '-'}</Text>
-              <Text style={styles.cartCell}>{item.betType === 'palet' ? `$${item.amount}` : '-'}</Text>
+              <Text style={styles.cartCell}>{item.betType === 'recto' ? `$${item.amount.toFixed(2)}` : '-'}</Text>
+              <Text style={styles.cartCell}>{item.betType === 'combinado' ? `$${item.amount.toFixed(2)}` : '-'}</Text>
+              <Text style={styles.cartCell}>{item.betType === 'palet' ? `$${item.amount.toFixed(2)}` : '-'}</Text>
               <IconButton icon="delete-outline" iconColor={colors.danger} size={18} onPress={() => removeFromCart(item.id)} />
             </View>
           )}
@@ -250,7 +291,7 @@ export default function NewSaleScreen() {
           buttonColor={colors.brand}
           style={{ marginTop: 16 }}
         >
-          Procesar ${cartTotal.toFixed(0)}
+          Procesar ${cartTotal.toFixed(2)}
         </Button>
       </View>
 

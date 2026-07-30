@@ -18,9 +18,10 @@ export class SalesController {
 
   // Un vendedor real no procesa más de ~1 venta cada 1-2s en hora pico; 40/min deja margen
   // generoso mientras limita ráfagas automatizadas.
+  // El dueño/admin suele también atender el mostrador y vender directamente, no solo el vendedor.
   @Throttle({ default: { limit: 40, ttl: 60_000 } })
   @Post('process')
-  @Roles(Role.vendedor)
+  @Roles(Role.vendedor, Role.admin, Role.super)
   @Audit({ action: 'sale.create', entity: 'Sale' })
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateSaleDto) {
     return this.salesService.create(user.id, dto);
@@ -30,7 +31,7 @@ export class SalesController {
   // número con montos independientes por tipo de apuesta (recto/combinado/palet).
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post('process-batch')
-  @Roles(Role.vendedor)
+  @Roles(Role.vendedor, Role.admin, Role.super)
   @Audit({ action: 'sale.createBatch', entity: 'Sale' })
   createBatch(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateBatchSaleDto) {
     return this.salesService.createBatch(user.id, dto);
@@ -53,13 +54,13 @@ export class SalesController {
   }
 
   @Get('sales/ultsale')
-  @Roles(Role.vendedor)
+  @Roles(Role.vendedor, Role.admin, Role.super)
   lastSale(@CurrentUser() user: AuthenticatedUser, @Query('date') date?: string) {
     return this.salesService.lastSale(user.id, date);
   }
 
   @Delete('sales/delete/:id')
-  @Roles(Role.vendedor)
+  @Roles(Role.vendedor, Role.admin, Role.super)
   @Audit({ action: 'sale.cancel', entity: 'Sale' })
   cancelBySeller(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: CancelSaleDto) {
     return this.salesService.cancelBySeller(id, user.id, dto.reason);
