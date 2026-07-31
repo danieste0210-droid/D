@@ -20,6 +20,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { PayoutMultipliersModule } from './modules/payout-multipliers/payout-multipliers.module';
 import { BlockedNumbersModule } from './modules/blocked-numbers/blocked-numbers.module';
 import { CombinadoMultipliersModule } from './modules/combinado-multipliers/combinado-multipliers.module';
+import { Chance3MultipliersModule } from './modules/chance3-multipliers/chance3-multipliers.module';
 import { PaletMultipliersModule } from './modules/palet-multipliers/palet-multipliers.module';
 
 @Module({
@@ -48,6 +49,7 @@ import { PaletMultipliersModule } from './modules/palet-multipliers/palet-multip
     PayoutMultipliersModule,
     BlockedNumbersModule,
     CombinadoMultipliersModule,
+    Chance3MultipliersModule,
     PaletMultipliersModule,
   ],
   providers: [

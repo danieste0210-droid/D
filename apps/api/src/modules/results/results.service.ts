@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { AwardStatus } from '@prisma/client';
+import { AwardStatus, PaymentMethod } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 // Publicar resultados (con cálculo de premios) vive en lotteries.service.processAwards() --
@@ -41,5 +41,32 @@ export class ResultsService {
 
   pendingAwards() {
     return this.prisma.award.findMany({ where: { status: AwardStatus.pending }, include: { sale: true } });
+  }
+
+  // pendiente -> aprobado: paso de revisión antes de pagar, no mueve dinero.
+  async approve(id: string) {
+    const award = await this.getAwardOrThrow(id);
+    if (award.status !== AwardStatus.pending) {
+      throw new ConflictException('Solo se puede aprobar un premio pendiente');
+    }
+    return this.prisma.award.update({ where: { id }, data: { status: AwardStatus.approved } });
+  }
+
+  // pendiente o aprobado -> pagado: registra método de pago (efectivo/Yappy), quién y cuándo.
+  async pay(id: string, paymentMethod: PaymentMethod, paidById: string) {
+    const award = await this.getAwardOrThrow(id);
+    if (award.status !== AwardStatus.pending && award.status !== AwardStatus.approved) {
+      throw new ConflictException('Solo se puede pagar un premio pendiente o aprobado');
+    }
+    return this.prisma.award.update({
+      where: { id },
+      data: { status: AwardStatus.paid, paymentMethod, paidAt: new Date(), paidById },
+    });
+  }
+
+  private async getAwardOrThrow(id: string) {
+    const award = await this.prisma.award.findUnique({ where: { id } });
+    if (!award) throw new NotFoundException('Premio no encontrado');
+    return award;
   }
 }

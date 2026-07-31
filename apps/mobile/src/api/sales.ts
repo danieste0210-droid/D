@@ -5,7 +5,8 @@ export type SaleStatus = 'active' | 'cancelled' | 'paid';
 
 // recto: apuesta tradicional (2/3/4 cifras). combinado: cubre todas las permutaciones de 3/4
 // cifras contra el 1er premio. palet: 2 cifras, gana si coincide con dos posiciones a la vez.
-export type BetType = 'recto' | 'combinado' | 'palet';
+// chance3: 3 cifras, coincidencia exacta contra el número derivado del 1er y 2do premio.
+export type BetType = 'recto' | 'combinado' | 'palet' | 'chance3';
 
 export interface Sale {
   id: string;
@@ -39,8 +40,8 @@ export interface SaleBatchLottery {
   lines: SaleBatchLine[];
   multipliers: {
     rectoDosCifras: [number, number, number];
-    tripleMultiplier: number;
-    paletTiers: [number, number, number];
+    chance3Multiplier: number;
+    paletTiers: [number, number];
   };
 }
 
@@ -82,6 +83,7 @@ export interface BatchSaleItem {
   rectoAmount?: number;
   combinadoAmount?: number;
   paletAmount?: number;
+  chance3Amount?: number;
 }
 
 export interface CreateBatchSalePayload {

@@ -70,6 +70,10 @@ export const endpoints = {
     byLottery: (lotteryId: string) => `/palet-multipliers?lotteryId=${lotteryId}`,
     upsert: '/palet-multipliers',
   },
+  chance3Multipliers: {
+    byLottery: (lotteryId: string) => `/chance3-multipliers?lotteryId=${lotteryId}`,
+    upsert: '/chance3-multipliers',
+  },
   blockedNumbers: {
     all: '/blocked-numbers',
     create: '/blocked-numbers',

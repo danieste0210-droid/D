@@ -3,7 +3,9 @@ import { ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Audit } from '../../common/decorators/audit.decorator';
+import { CurrentUser, AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { ReverseResultDto } from './dto/reverse-result.dto';
+import { PayAwardDto } from './dto/pay-award.dto';
 import { ResultsService } from './results.service';
 
 // Publicar un resultado nuevo se hace en /lotteries/process/awards (crea el Result Y calcula
@@ -25,5 +27,17 @@ export class ResultsController {
   @Get('awards/pending')
   pendingAwards() {
     return this.resultsService.pendingAwards();
+  }
+
+  @Post('awards/:id/approve')
+  @Audit({ action: 'award.approve', entity: 'Award' })
+  approveAward(@Param('id') id: string) {
+    return this.resultsService.approve(id);
+  }
+
+  @Post('awards/:id/pay')
+  @Audit({ action: 'award.pay', entity: 'Award' })
+  payAward(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser, @Body() dto: PayAwardDto) {
+    return this.resultsService.pay(id, dto.paymentMethod, user.id);
   }
 }

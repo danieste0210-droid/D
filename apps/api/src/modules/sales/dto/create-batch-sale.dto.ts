@@ -21,6 +21,11 @@ export class BatchSaleItemDto {
   @IsNumber()
   @IsPositive()
   paletAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  chance3Amount?: number;
 }
 
 // Venta en lote: los mismos números del carrito se juegan en TODAS las loterías seleccionadas

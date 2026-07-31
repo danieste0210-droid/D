@@ -32,8 +32,8 @@ function buildQrPayload(batch: { batchId: string; ticketCode: string; lotteries:
 
 function multiplierLine(lottery: SaleBatchLottery): string {
   const [p1, p2, p3] = lottery.multipliers.rectoDosCifras;
-  const [mayor, medio, menor] = lottery.multipliers.paletTiers;
-  return `2 CIFRAS: ${p1}x1 | ${p2}x1 | ${p3}x1\nTRIPLE: ${lottery.multipliers.tripleMultiplier}x1\nPALE: ${mayor}x1 | ${medio}x1 | ${menor}x1`;
+  const [mayor, menor] = lottery.multipliers.paletTiers;
+  return `2 CIFRAS: ${p1}x1 | ${p2}x1 | ${p3}x1\nCHANCE 3 CIFRAS: ${lottery.multipliers.chance3Multiplier}x1\nPALE: ${mayor}x1 | ${menor}x1`;
 }
 
 // "Resumen de venta": el recibo/visor único de una venta agrupada (un batchId, un código, todas

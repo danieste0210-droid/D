@@ -12,6 +12,7 @@ const VALID_DIGIT_COUNTS: Record<BetType, number[]> = {
   [BetType.recto]: [2, 3, 4],
   [BetType.combinado]: [3, 4],
   [BetType.palet]: [2],
+  [BetType.chance3]: [3],
 };
 
 interface SaleInput {
@@ -105,6 +106,11 @@ export class SalesService {
                 await this.createOne(tx, sellerId, { ...shared, amount: item.paletAmount, betType: BetType.palet }, { ...precomputed, isBlocked }),
               );
             }
+            if (item.chance3Amount != null) {
+              created.push(
+                await this.createOne(tx, sellerId, { ...shared, amount: item.chance3Amount, betType: BetType.chance3 }, { ...precomputed, isBlocked }),
+              );
+            }
           }
         }
         if (created.length === 0) {
@@ -138,6 +144,12 @@ export class SalesService {
     const lottery = precomputed ? precomputed.lottery : await client.lottery.findUnique({ where: { id: input.lotteryId } });
     if (!lottery || !lottery.active || lottery.blocked) {
       throw new BadRequestException('Lotería no disponible');
+    }
+
+    // "Chance de tres cifras" necesita 2do premio para derivar el número ganador -- no aplica a
+    // loterías de un solo resultado (ej. El Salvador, resultPositions = 1).
+    if (input.betType === BetType.chance3 && lottery.resultPositions < 2) {
+      throw new BadRequestException(`${lottery.name} no ofrece chance de tres cifras (lotería de un solo resultado)`);
     }
 
     const isOpen = precomputed ? precomputed.isOpen : await this.closures.isLotteryOpen(input.lotteryId);
@@ -247,9 +259,10 @@ export class SalesService {
     // debe aparecer en el recibo -- este visor refleja el estado ACTUAL de la venta, no el
     // historial completo de cada línea que alguna vez tuvo.
     const activeLotteryIds = [...new Set(lines.filter((l) => l.status === SaleStatus.active).map((l) => l.lotteryId))];
-    const [payoutMultipliers, paletMultipliers] = await Promise.all([
+    const [payoutMultipliers, paletMultipliers, chance3Multipliers] = await Promise.all([
       this.prisma.payoutMultiplier.findMany({ where: { lotteryId: { in: activeLotteryIds } } }),
       this.prisma.paletMultiplier.findMany({ where: { lotteryId: { in: activeLotteryIds } } }),
+      this.prisma.chance3Multiplier.findMany({ where: { lotteryId: { in: activeLotteryIds } } }),
     ]);
 
     const lotteries = activeLotteryIds.map((lotteryId) => {
@@ -263,11 +276,8 @@ export class SalesService {
             )?.multiplier ?? 0,
           ),
       );
-      const tripleMultiplier = Number(
-        payoutMultipliers.find((m) => m.lotteryId === lotteryId && m.digitCount === 3 && m.position === 1 && m.matchType === 'ultimas')
-          ?.multiplier ?? 0,
-      );
-      const paletTiers = (['mayor', 'medio', 'menor'] as const).map(
+      const chance3Multiplier = Number(chance3Multipliers.find((m) => m.lotteryId === lotteryId)?.multiplier ?? 0);
+      const paletTiers = (['mayor', 'menor'] as const).map(
         (tier) => Number(paletMultipliers.find((m) => m.lotteryId === lotteryId && m.tier === tier)?.multiplier ?? 0),
       );
 
@@ -276,7 +286,7 @@ export class SalesService {
         lotteryName: lottery.name,
         subtotal: lotteryLines.reduce((sum, l) => sum + Number(l.amount), 0),
         lines: lotteryLines.map((l) => ({ id: l.id, numberPlayed: l.numberPlayed, betType: l.betType, amount: Number(l.amount), status: l.status })),
-        multipliers: { rectoDosCifras, tripleMultiplier, paletTiers },
+        multipliers: { rectoDosCifras, chance3Multiplier, paletTiers },
       };
     });
 

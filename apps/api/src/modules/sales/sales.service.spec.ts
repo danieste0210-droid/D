@@ -12,6 +12,7 @@ function buildService(
     sales?: any[];
     payoutMultipliers?: any[];
     paletMultipliers?: any[];
+    chance3Multipliers?: any[];
   } = {},
 ) {
   const lotteries = overrides.lotteries ?? { 'lottery-1': OPEN_LOTTERY };
@@ -77,6 +78,7 @@ function buildService(
     sale: { create: saleCreate, aggregate: saleAggregate, findFirst: saleFindFirst, findMany: saleFindMany, updateMany: saleUpdateMany },
     payoutMultiplier: { findMany: jest.fn().mockResolvedValue(overrides.payoutMultipliers ?? []) },
     paletMultiplier: { findMany: jest.fn().mockResolvedValue(overrides.paletMultipliers ?? []) },
+    chance3Multiplier: { findMany: jest.fn().mockResolvedValue(overrides.chance3Multipliers ?? []) },
   };
 
   const prisma = {

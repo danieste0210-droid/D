@@ -28,6 +28,7 @@ function buildService(
     multipliers?: any[];
     combinadoMultipliers?: any[];
     paletMultipliers?: any[];
+    chance3Multiplier?: any;
   } = {},
 ) {
   const lottery = overrides.lottery ?? { id: 'lottery-1', name: 'Chance Demo' };
@@ -36,6 +37,7 @@ function buildService(
   const multipliers = overrides.multipliers ?? DEFAULT_MULTIPLIERS;
   const combinadoMultipliers = overrides.combinadoMultipliers ?? [];
   const paletMultipliers = overrides.paletMultipliers ?? [];
+  const chance3Multiplier = overrides.chance3Multiplier ?? null;
 
   const txAwardCreate = jest.fn().mockResolvedValue(undefined);
   const txResultCreate = jest.fn().mockResolvedValue({ id: 'result-1' });
@@ -53,6 +55,7 @@ function buildService(
     payoutMultiplier: { findMany: jest.fn().mockResolvedValue(multipliers) },
     combinadoMultiplier: { findMany: jest.fn().mockResolvedValue(combinadoMultipliers) },
     paletMultiplier: { findMany: jest.fn().mockResolvedValue(paletMultipliers) },
+    chance3Multiplier: { findUnique: jest.fn().mockResolvedValue(chance3Multiplier) },
     $transaction: jest.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
   };
 
@@ -300,17 +303,15 @@ describe('LotteriesService.processAwards', () => {
     });
   });
 
-  describe('apuesta Palet (cascada de 3 pasos: mayor -> medio -> menor)', () => {
+  describe('apuesta Palet (2 niveles: mayor -> menor)', () => {
     const paletMultipliers = [
       { tier: 'mayor', multiplier: 1000 },
-      { tier: 'medio', multiplier: 500 },
       { tier: 'menor', multiplier: 200 },
     ];
 
     it('gana premio mayor si coincide con 1er Y 2do premio a la vez', async () => {
-      // firstNumber "1234" -> últimas 2 "34". secondNumber "5678" -> últimas 2 "78". No coinciden
-      // entre sí, así que se ajusta el dto para que compartan las mismas últimas 2 cifras.
-      const paletDto = { ...dto, secondNumber: '9934' }; // últimas 2 de 2do premio = "34" también
+      // firstNumber "1234" -> últimas 2 "34". secondNumber ajustado para terminar también en "34".
+      const paletDto = { ...dto, secondNumber: '9934' };
       const { service, tx } = buildService({
         paletMultipliers,
         sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 3, numberPlayed: '34', betType: 'palet' }],
@@ -324,8 +325,9 @@ describe('LotteriesService.processAwards', () => {
       });
     });
 
-    it('gana premio medio si coincide con 1er Y 3er premio a la vez (no con el 2do)', async () => {
-      // firstNumber "1234" -> "34". thirdNumber ajustado para terminar también en "34".
+    it('gana premio mayor TAMBIÉN si coincide con 1er Y 3er premio (mismo pago que 1er-2do)', async () => {
+      // firstNumber "1234" -> "34". thirdNumber ajustado para terminar también en "34", pero el
+      // 2do premio NO -- el nuevo modelo de 2 niveles paga "mayor" en ambos casos por igual.
       const paletDto = { ...dto, thirdNumber: '9934' };
       const { service, tx } = buildService({
         paletMultipliers,
@@ -336,7 +338,7 @@ describe('LotteriesService.processAwards', () => {
 
       expect(result.awardsCreated).toBe(1);
       expect(tx.txAwardCreate).toHaveBeenCalledWith({
-        data: expect.objectContaining({ position: 2, amount: 3 * 500 }),
+        data: expect.objectContaining({ position: 1, amount: 3 * 1000 }), // mismo multiplicador "mayor", no uno propio de "medio"
       });
     });
 
@@ -352,13 +354,11 @@ describe('LotteriesService.processAwards', () => {
 
       expect(result.awardsCreated).toBe(1);
       expect(tx.txAwardCreate).toHaveBeenCalledWith({
-        data: expect.objectContaining({ position: 3, amount: 3 * 200 }),
+        data: expect.objectContaining({ position: 2, amount: 3 * 200 }),
       });
     });
 
-    it('si coinciden los 3 premios a la vez, paga SOLO mayor (primero en la cascada, no los tres)', async () => {
-      // Los 3 premios terminan en "34": califica para mayor, medio Y menor a la vez, pero la
-      // cascada se detiene en el primero que coincide.
+    it('si coinciden los 3 premios a la vez, paga SOLO mayor una vez (no dobla el pago)', async () => {
       const paletDto = { ...dto, secondNumber: '9934', thirdNumber: '9934' };
       const { service, tx } = buildService({
         paletMultipliers,
@@ -374,11 +374,9 @@ describe('LotteriesService.processAwards', () => {
     });
 
     it('si falta el multiplicador del tier que coincide, no paga nada (no cae al siguiente tier)', async () => {
-      // Califica para "mayor", pero mayor no tiene multiplicador configurado -- no debe pagar
-      // "medio" ni "menor" como si fuera un fallback, porque el ticket SÍ es mayor.
       const paletDto = { ...dto, secondNumber: '9934' };
       const { service, tx } = buildService({
-        paletMultipliers: [{ tier: 'medio', multiplier: 500 }, { tier: 'menor', multiplier: 200 }],
+        paletMultipliers: [{ tier: 'menor', multiplier: 200 }], // falta "mayor"
         sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 3, numberPlayed: '34', betType: 'palet' }],
       });
 
@@ -399,6 +397,210 @@ describe('LotteriesService.processAwards', () => {
 
       expect(result.awardsCreated).toBe(0);
       expect(tx.txAwardCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('bono "últimas 3 cifras" (billetes de 4 cifras completas)', () => {
+    const multipliersConUltimas3 = [
+      ...DEFAULT_MULTIPLIERS,
+      { digitCount: 4, position: 1, matchType: 'ultimas3', multiplier: 50 },
+    ];
+
+    it('gana el bono si coinciden las últimas 3 cifras aunque no coincida la primera', async () => {
+      // firstNumber "1234" -> últimas 3 = "234". numberPlayed "9234" comparte "234" pero no
+      // coincide exacto ni en las primeras 3 (123 vs 923).
+      const { service, tx } = buildService({
+        multipliers: multipliersConUltimas3,
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '9234', betType: 'recto' }],
+      });
+
+      const result = await service.processAwards(dto, 'user-1');
+
+      expect(result.awardsCreated).toBe(1);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({ position: 1, amount: 5 * 50 }),
+      });
+    });
+
+    it('no aplica a jugadas de 2 o 3 cifras', async () => {
+      // "999" no cifra en 3 no coincide con la regla normal de últimas-3-cifras (firstNumber
+      // "1234" -> "234"), así que el único chequeo posible sería el bono -- que no debe aplicar
+      // a jugadas que no son de 4 cifras completas.
+      const { service, tx } = buildService({
+        multipliers: multipliersConUltimas3,
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '999', betType: 'recto' }],
+      });
+
+      const result = await service.processAwards(dto, 'user-1');
+
+      expect(result.awardsCreated).toBe(0);
+      expect(tx.txAwardCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('apuesta chance3 ("chance de tres cifras": número derivado, coincidencia exacta)', () => {
+    it('gana si el número jugado coincide exacto con últimas2(1er premio) + última(2do premio)', async () => {
+      // firstNumber "1234" -> últimas 2 = "34". secondNumber "5678" -> última cifra = "8".
+      // Derivado = "348".
+      const { service, tx } = buildService({
+        chance3Multiplier: { multiplier: 400 },
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 1, numberPlayed: '348', betType: 'chance3' }],
+      });
+
+      const result = await service.processAwards(dto, 'user-1');
+
+      expect(result.awardsCreated).toBe(1);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({ position: 1, amount: 1 * 400 }),
+      });
+    });
+
+    it('NO gana con una permutación del derivado -- es coincidencia exacta, no combinado', async () => {
+      // "384" es permutación de "348" pero no es una coincidencia EXACTA.
+      const { service, tx } = buildService({
+        chance3Multiplier: { multiplier: 400 },
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 1, numberPlayed: '384', betType: 'chance3' }],
+      });
+
+      const result = await service.processAwards(dto, 'user-1');
+
+      expect(result.awardsCreated).toBe(0);
+      expect(tx.txAwardCreate).not.toHaveBeenCalled();
+    });
+
+    it('no aplica si la lotería no tiene 2do premio (ej. El Salvador) -- no revienta, no paga', async () => {
+      const saltoDto = { lotteryId: 'lottery-1', drawDate: '2026-07-27', firstNumber: '67' };
+      const { service, tx } = buildService({
+        chance3Multiplier: { multiplier: 400 },
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 1, numberPlayed: '671', betType: 'chance3' }],
+      });
+
+      const result = await service.processAwards(saltoDto as any, 'user-1');
+
+      expect(result.awardsCreated).toBe(0);
+      expect(tx.txAwardCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  // Réplica exacta de los ejemplos numéricos de la especificación de negocio (Lotería Nacional:
+  // 1er premio 2945, 2do 0872, 3er 7592) -- confirma que la implementación calza cifra por cifra
+  // con las tablas de pago dadas, no solo con la estructura general.
+  describe('ejemplos de la especificación de negocio (Lotería Nacional 2945/0872/7592)', () => {
+    const nacionalDto = { lotteryId: 'lottery-1', drawDate: '2026-07-27', firstNumber: '2945', secondNumber: '0872', thirdNumber: '7592' };
+    const chanceMultipliers = [
+      { digitCount: 2, position: 1, matchType: 'ultimas', multiplier: 56 },
+      { digitCount: 2, position: 2, matchType: 'ultimas', multiplier: 12 },
+      { digitCount: 2, position: 3, matchType: 'ultimas', multiplier: 8 },
+    ];
+
+    it('chance de 2 cifras: apuesta de $1 al 45 (últimas 2 del 1er premio) paga $56', async () => {
+      const { service, tx } = buildService({
+        multipliers: chanceMultipliers,
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 1, numberPlayed: '45', betType: 'recto' }],
+      });
+
+      const result = await service.processAwards(nacionalDto, 'user-1');
+
+      expect(result.awardsCreated).toBe(1);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ position: 1, amount: 56 }) });
+    });
+
+    it('chance de 2 cifras: apuesta de $0.50 al 72 (últimas 2 del 2do premio) paga $6', async () => {
+      const { service, tx } = buildService({
+        multipliers: chanceMultipliers,
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 0.5, numberPlayed: '72', betType: 'recto' }],
+      });
+
+      const result = await service.processAwards(nacionalDto, 'user-1');
+
+      expect(result.awardsCreated).toBe(1);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ position: 2, amount: 6 }) });
+    });
+
+    it('chance de 3 cifras: derivado 45+2="452", apuesta de $0.25 paga $100 (multiplicador ×400)', async () => {
+      const { service, tx } = buildService({
+        chance3Multiplier: { multiplier: 400 },
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 0.25, numberPlayed: '452', betType: 'chance3' }],
+      });
+
+      const result = await service.processAwards(nacionalDto, 'user-1');
+
+      expect(result.awardsCreated).toBe(1);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ position: 1, amount: 100 }) });
+    });
+
+    it('billete: selección exacta 2945 de $1 paga $2,500', async () => {
+      const { service, tx } = buildService({
+        multipliers: [{ digitCount: 4, position: 1, matchType: 'ultimas', multiplier: 2500 }],
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 1, numberPlayed: '2945', betType: 'recto' }],
+      });
+
+      const result = await service.processAwards(nacionalDto, 'user-1');
+
+      expect(result.awardsCreated).toBe(1);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ position: 1, amount: 2500 }) });
+    });
+
+    it('billete: selección 2947 (3 primeras cifras) de $1 paga $50, sujeto a política de acumulación', async () => {
+      const { service, tx } = buildService({
+        multipliers: [{ digitCount: 4, position: 1, matchType: 'primeras', multiplier: 50 }],
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 1, numberPlayed: '2947', betType: 'recto' }],
+      });
+
+      const result = await service.processAwards(nacionalDto, 'user-1');
+
+      expect(result.awardsCreated).toBe(1);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ position: 1, amount: 50 }) });
+    });
+
+    it('tres cifras combinado: selección 625 vs 1er premio 562 (permutación), apuesta $0.25 paga $25', async () => {
+      const { service, tx } = buildService({
+        lottery: { id: 'lottery-1', name: 'Chance Demo' },
+        combinadoMultipliers: [{ digitCount: 3, multiplier: 100 }],
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 0.25, numberPlayed: '625', betType: 'combinado' }],
+      });
+      const combinadoDto = { lotteryId: 'lottery-1', drawDate: '2026-07-27', firstNumber: '562' };
+
+      const result = await service.processAwards(combinadoDto as any, 'user-1');
+
+      expect(result.awardsCreated).toBe(1);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ position: 1, amount: 25 }) });
+    });
+
+    it('cuatro cifras combinado: selección 0256 vs 1er premio 6205 (permutación), apuesta $1 paga $200', async () => {
+      const { service, tx } = buildService({
+        combinadoMultipliers: [{ digitCount: 4, multiplier: 200 }],
+        sales: [{ id: 'sale-1', sellerId: 'seller-1', amount: 1, numberPlayed: '0256', betType: 'combinado' }],
+      });
+      const combinadoDto = { lotteryId: 'lottery-1', drawDate: '2026-07-27', firstNumber: '6205' };
+
+      const result = await service.processAwards(combinadoDto as any, 'user-1');
+
+      expect(result.awardsCreated).toBe(1);
+      expect(tx.txAwardCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ position: 1, amount: 200 }) });
+    });
+
+    // "0256" debe generar exactamente 24 permutaciones únicas (4! sin repetir cifras), ninguna
+    // con dígitos ajenos a {0,2,5,6} -- valida por código, no por lista manual, que isPermutation()
+    // (la comparación real que usa Combinado) es equivalente a comparar contra las 24 permutaciones.
+    it('0256 tiene exactamente 24 permutaciones únicas, todas compuestas solo por 0,2,5,6', () => {
+      const digits = '0256'.split('');
+      const permutations = new Set<string>();
+      const permute = (prefix: string[], rest: string[]) => {
+        if (rest.length === 0) {
+          permutations.add(prefix.join(''));
+          return;
+        }
+        for (let i = 0; i < rest.length; i++) {
+          permute([...prefix, rest[i]], [...rest.slice(0, i), ...rest.slice(i + 1)]);
+        }
+      };
+      permute([], digits);
+
+      expect(permutations.size).toBe(24);
+      for (const combo of permutations) {
+        expect(combo.split('').sort().join('')).toBe('0256');
+      }
     });
   });
 

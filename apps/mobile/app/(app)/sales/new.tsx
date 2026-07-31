@@ -65,12 +65,14 @@ export default function NewSaleScreen() {
   const [rectoValue, setRectoValue] = useState('');
   const [combinadoValue, setCombinadoValue] = useState('');
   const [paletValue, setPaletValue] = useState('');
+  const [chance3Value, setChance3Value] = useState('');
   const [cart, setCart] = useState<CartEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<string | null>(null);
 
   const selectedLotteries = (lotteries ?? []).filter((l: LotteryForDay) => selectedLotteryIds.includes(l.id));
-  const pendingTotal = (toDollars(rectoValue, unit) ?? 0) + (toDollars(combinadoValue, unit) ?? 0) + (toDollars(paletValue, unit) ?? 0);
+  const pendingTotal =
+    (toDollars(rectoValue, unit) ?? 0) + (toDollars(combinadoValue, unit) ?? 0) + (toDollars(paletValue, unit) ?? 0) + (toDollars(chance3Value, unit) ?? 0);
   // El carrito se juega en TODAS las loterías seleccionadas -- el total a cobrar es el del
   // carrito multiplicado por la cantidad de loterías marcadas, no solo la suma del carrito.
   const cartTotal = cart.reduce((sum, item) => sum + item.amount, 0) * Math.max(selectedLotteryIds.length, 1);
@@ -84,18 +86,21 @@ export default function NewSaleScreen() {
     const rectoAmount = toDollars(rectoValue, unit);
     const combinadoAmount = toDollars(combinadoValue, unit);
     const paletAmount = toDollars(paletValue, unit);
-    if (rectoAmount == null && combinadoAmount == null && paletAmount == null) return;
+    const chance3Amount = toDollars(chance3Value, unit);
+    if (rectoAmount == null && combinadoAmount == null && paletAmount == null && chance3Amount == null) return;
 
     const newEntries: CartEntry[] = [];
     if (rectoAmount != null) newEntries.push({ id: `${Date.now()}-recto`, numberPlayed: numberPlayed.trim(), betType: 'recto', amount: rectoAmount });
     if (combinadoAmount != null) newEntries.push({ id: `${Date.now()}-combinado`, numberPlayed: numberPlayed.trim(), betType: 'combinado', amount: combinadoAmount });
     if (paletAmount != null) newEntries.push({ id: `${Date.now()}-palet`, numberPlayed: numberPlayed.trim(), betType: 'palet', amount: paletAmount });
+    if (chance3Amount != null) newEntries.push({ id: `${Date.now()}-chance3`, numberPlayed: numberPlayed.trim(), betType: 'chance3', amount: chance3Amount });
 
     setCart((prev) => [...prev, ...newEntries]);
     setNumberPlayed('');
     setRectoValue('');
     setCombinadoValue('');
     setPaletValue('');
+    setChance3Value('');
   };
 
   const removeFromCart = (id: string) => {
@@ -135,6 +140,7 @@ export default function NewSaleScreen() {
       if (entry.betType === 'recto') item.rectoAmount = entry.amount;
       if (entry.betType === 'combinado') item.combinadoAmount = entry.amount;
       if (entry.betType === 'palet') item.paletAmount = entry.amount;
+      if (entry.betType === 'chance3') item.chance3Amount = entry.amount;
     }
 
     try {
@@ -260,6 +266,16 @@ export default function NewSaleScreen() {
             style={[styles.field, { flex: 1 }]}
           />
         </View>
+        <View style={styles.fieldsRow}>
+          <TextInput
+            label={unit === 'viles' ? 'Chance 3 (viles)' : '$Chance 3'}
+            value={chance3Value}
+            onChangeText={setChance3Value}
+            keyboardType="decimal-pad"
+            style={[styles.field, { flex: 1 }]}
+          />
+          <View style={{ flex: 1 }} />
+        </View>
 
         <Button mode="contained" onPress={handleSumar} disabled={!numberPlayed.trim() || pendingTotal <= 0} buttonColor={colors.brand} style={{ marginBottom: 16 }}>
           Sumar — ${pendingTotal.toFixed(2)}
@@ -274,6 +290,7 @@ export default function NewSaleScreen() {
               <Text style={styles.cartCell}>{item.betType === 'recto' ? `$${item.amount.toFixed(2)}` : '-'}</Text>
               <Text style={styles.cartCell}>{item.betType === 'combinado' ? `$${item.amount.toFixed(2)}` : '-'}</Text>
               <Text style={styles.cartCell}>{item.betType === 'palet' ? `$${item.amount.toFixed(2)}` : '-'}</Text>
+              <Text style={styles.cartCell}>{item.betType === 'chance3' ? `$${item.amount.toFixed(2)}` : '-'}</Text>
               <IconButton icon="delete-outline" iconColor={colors.danger} size={18} onPress={() => removeFromCart(item.id)} />
             </View>
           )}

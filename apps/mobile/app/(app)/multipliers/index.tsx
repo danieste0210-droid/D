@@ -6,6 +6,7 @@ import { useLotteries } from '@/features/lotteries/hooks';
 import { usePayoutMultipliers, useUpsertPayoutMultiplier } from '@/features/payoutMultipliers/hooks';
 import { useCombinadoMultipliers, useUpsertCombinadoMultiplier } from '@/features/combinadoMultipliers/hooks';
 import { usePaletMultipliers, useUpsertPaletMultiplier } from '@/features/paletMultipliers/hooks';
+import { useChance3Multiplier, useUpsertChance3Multiplier } from '@/features/chance3Multipliers/hooks';
 import { PlatformPicker } from '@/components/PlatformPicker';
 import type { Lottery } from '@/api/lotteries';
 import type { PaletTier } from '@/api/paletMultipliers';
@@ -14,14 +15,14 @@ const DIGIT_COUNTS = [2, 3, 4] as const;
 const POSITIONS = [1, 2, 3] as const;
 const POSITION_LABELS: Record<number, string> = { 1: '1ra', 2: '2da', 3: '3ra' };
 const COMBINADO_DIGIT_COUNTS = [3, 4] as const;
-const PALET_TIERS: PaletTier[] = ['mayor', 'medio', 'menor'];
+// 2 niveles: mayor cubre 1ra-con-2da Y 1ra-con-3ra por igual (mismo pago); menor es 2da-con-3ra.
+const PALET_TIERS: PaletTier[] = ['mayor', 'menor'];
 const PALET_TIER_LABELS: Record<PaletTier, string> = {
-  mayor: 'Premio mayor (1ra con 2da)',
-  medio: 'Premio medio (1ra con 3ra)',
+  mayor: 'Premio mayor (1ra-2da o 1ra-3ra)',
   menor: 'Premio menor (2da con 3ra)',
 };
 
-type RectoMatchType = 'ultimas' | 'primeras' | 'ultimas2';
+type RectoMatchType = 'ultimas' | 'primeras' | 'ultimas3' | 'ultimas2';
 
 function rectoKey(digitCount: number, position: number, matchType: RectoMatchType) {
   return `${digitCount}-${position}-${matchType}`;
@@ -35,14 +36,17 @@ export default function MultipliersScreen() {
   const { data: rectoMultipliers, isLoading: loadingRecto } = usePayoutMultipliers(lotteryId);
   const { data: combinadoMultipliers, isLoading: loadingCombinado } = useCombinadoMultipliers(lotteryId);
   const { data: paletMultipliers, isLoading: loadingPalet } = usePaletMultipliers(lotteryId);
+  const { data: chance3Multiplier, isLoading: loadingChance3 } = useChance3Multiplier(lotteryId);
   const upsertRecto = useUpsertPayoutMultiplier();
   const upsertCombinado = useUpsertCombinadoMultiplier();
   const upsertPalet = useUpsertPaletMultiplier();
-  const isLoading = loadingRecto || loadingCombinado || loadingPalet;
+  const upsertChance3 = useUpsertChance3Multiplier();
+  const isLoading = loadingRecto || loadingCombinado || loadingPalet || loadingChance3;
 
   const [rectoValues, setRectoValues] = useState<Record<string, string>>({});
   const [combinadoValues, setCombinadoValues] = useState<Record<number, string>>({});
   const [paletValues, setPaletValues] = useState<Record<string, string>>({});
+  const [chance3Value, setChance3Value] = useState('');
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<string | null>(null);
 
@@ -65,6 +69,10 @@ export default function MultipliersScreen() {
     for (const m of paletMultipliers ?? []) next[m.tier] = m.multiplier;
     setPaletValues(next);
   }, [paletMultipliers]);
+
+  useEffect(() => {
+    setChance3Value(chance3Multiplier?.multiplier ?? '');
+  }, [chance3Multiplier]);
 
   const handleSaveRecto = async (digitCount: number, position: number, matchType: RectoMatchType) => {
     if (!lotteryId) return;
@@ -95,6 +103,23 @@ export default function MultipliersScreen() {
     try {
       await upsertCombinado.mutateAsync({ lotteryId, digitCount, multiplier });
       setSnackbar(`Guardado: Combinado ${digitCount} cifras = ${multiplier}x`);
+    } catch {
+      setSnackbar('No se pudo guardar el multiplicador');
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  const handleSaveChance3 = async () => {
+    if (!lotteryId) return;
+    const key = 'chance3';
+    const multiplier = chance3Value ? parseFloat(chance3Value.replace(',', '.')) : NaN;
+    if (!chance3Value || Number.isNaN(multiplier) || multiplier <= 0) return;
+
+    setSavingKey(key);
+    try {
+      await upsertChance3.mutateAsync({ lotteryId, multiplier });
+      setSnackbar(`Guardado: Chance de tres cifras = ${multiplier}x`);
     } catch {
       setSnackbar('No se pudo guardar el multiplicador');
     } finally {
@@ -208,6 +233,36 @@ export default function MultipliersScreen() {
             </View>
 
             <Text variant="titleSmall" style={styles.sectionTitle}>
+              Bono: últimas 3 cifras (solo billetes de 4 cifras)
+            </Text>
+            <View style={styles.digitGroup}>
+              {POSITIONS.map((position) => {
+                const key = rectoKey(4, position, 'ultimas3');
+                return (
+                  <View key={key} style={styles.cellRow}>
+                    <Text style={styles.cellLabel}>{POSITION_LABELS[position]}</Text>
+                    <TextInput
+                      value={rectoValues[key] ?? ''}
+                      onChangeText={(v) => setRectoValues((prev) => ({ ...prev, [key]: v }))}
+                      keyboardType="decimal-pad"
+                      dense
+                      style={styles.cellInput}
+                    />
+                    <Button
+                      compact
+                      mode="contained"
+                      onPress={() => handleSaveRecto(4, position, 'ultimas3')}
+                      loading={savingKey === key}
+                      buttonColor={colors.brand}
+                    >
+                      Guardar
+                    </Button>
+                  </View>
+                );
+              })}
+            </View>
+
+            <Text variant="titleSmall" style={styles.sectionTitle}>
               Bono: últimas 2 cifras (solo billetes de 4 cifras)
             </Text>
             <View style={styles.digitGroup}>
@@ -265,6 +320,29 @@ export default function MultipliersScreen() {
                   </View>
                 );
               })}
+            </View>
+
+            <Text variant="titleSmall" style={styles.sectionTitle}>
+              Chance de tres cifras
+            </Text>
+            <Text variant="bodySmall" style={{ color: colors.textMuted, marginTop: 4 }}>
+              Coincidencia exacta contra últimas 2 cifras del 1er premio + última cifra del 2do premio. No
+              disponible para loterías de un solo resultado (ej. El Salvador).
+            </Text>
+            <View style={styles.digitGroup}>
+              <View style={styles.cellRow}>
+                <Text style={styles.cellLabel}>Multiplicador</Text>
+                <TextInput
+                  value={chance3Value}
+                  onChangeText={setChance3Value}
+                  keyboardType="decimal-pad"
+                  dense
+                  style={styles.cellInput}
+                />
+                <Button compact mode="contained" onPress={handleSaveChance3} loading={savingKey === 'chance3'} buttonColor={colors.brand}>
+                  Guardar
+                </Button>
+              </View>
             </View>
 
             <Text variant="titleSmall" style={styles.sectionTitle}>
