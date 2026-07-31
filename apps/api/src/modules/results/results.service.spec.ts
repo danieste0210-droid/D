@@ -16,6 +16,9 @@ function buildService(overrides: { result?: any; award?: any } = {}) {
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       findMany: jest.fn().mockResolvedValue([]),
     },
+    sale: {
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
     $transaction: jest.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(prisma)),
   };
 
@@ -92,5 +95,39 @@ describe('ResultsService.reverse', () => {
     const { service } = buildService({ result: undefined });
 
     await expect(service.reverse('no-existe', 'motivo')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('revierte tanto los premios pendientes como los ya aprobados (ninguno pagado todavía)', async () => {
+    const { service, prisma } = buildService({ result: { id: 'result-1', reversedAt: null, awards: [] } });
+
+    await service.reverse('result-1', 'motivo');
+
+    expect(prisma.award.updateMany).toHaveBeenCalledWith({
+      where: { resultId: 'result-1', status: { in: ['pending', 'approved'] } },
+      data: expect.objectContaining({ status: 'reversed' }),
+    });
+  });
+
+  it('libera las ventas resueltas contra este resultado para que vuelvan a quedar elegibles', async () => {
+    const { service, prisma } = buildService({ result: { id: 'result-1', reversedAt: null, awards: [] } });
+
+    await service.reverse('result-1', 'motivo');
+
+    expect(prisma.sale.updateMany).toHaveBeenCalledWith({
+      where: { resolvedResultId: 'result-1' },
+      data: { resolvedResultId: null },
+    });
+  });
+});
+
+describe('ResultsService.pendingAwards', () => {
+  it('incluye premios pendientes Y aprobados (un aprobado todavía no está pagado)', async () => {
+    const { service, prisma } = buildService();
+
+    await service.pendingAwards();
+
+    expect(prisma.award.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { status: { in: ['pending', 'approved'] } } }),
+    );
   });
 });

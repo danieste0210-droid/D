@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
-import { ActivityIndicator, Chip, FAB, HelperText, IconButton, Modal, Portal, Text, TextInput, Button } from 'react-native-paper';
+import { ActivityIndicator, Chip, FAB, HelperText, IconButton, Modal, Portal, SegmentedButtons, Text, TextInput, Button } from 'react-native-paper';
 import { colors } from '@/theme/colors';
 import { useAuthStore } from '@/state/authStore';
 import { useBlockLottery, useCreateLottery, useEditLottery, useLotteries } from '@/features/lotteries/hooks';
@@ -23,6 +23,7 @@ function LotteryRow({
         <Text variant="titleMedium">{lottery.name}</Text>
         <Text variant="bodySmall" style={styles.muted}>
           Límite/número: {lottery.maxAmountPerNumber ? `$${lottery.maxAmountPerNumber}` : 'sin límite'}
+          {lottery.resultPositions === 1 ? ' · Un solo resultado' : ''}
         </Text>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
@@ -56,6 +57,7 @@ export default function LotteriesScreen() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [maxAmount, setMaxAmount] = useState('');
+  const [resultPositions, setResultPositions] = useState<'3' | '1'>('3');
   const [error, setError] = useState<string | null>(null);
 
   const isEditing = !!editingId;
@@ -65,6 +67,7 @@ export default function LotteriesScreen() {
     setEditingId(null);
     setName('');
     setMaxAmount('');
+    setResultPositions('3');
     setError(null);
     setModalOpen(true);
   };
@@ -73,6 +76,7 @@ export default function LotteriesScreen() {
     setEditingId(lottery.id);
     setName(lottery.name);
     setMaxAmount(lottery.maxAmountPerNumber ?? '');
+    setResultPositions(lottery.resultPositions === 1 ? '1' : '3');
     setError(null);
     setModalOpen(true);
   };
@@ -83,6 +87,7 @@ export default function LotteriesScreen() {
     const payload = {
       name: name.trim(),
       maxAmountPerNumber: maxAmount ? parseFloat(maxAmount.replace(',', '.')) : undefined,
+      resultPositions: Number(resultPositions),
     };
 
     try {
@@ -129,6 +134,18 @@ export default function LotteriesScreen() {
                 onChangeText={setMaxAmount}
                 keyboardType="decimal-pad"
                 style={styles.field}
+              />
+              <Text variant="bodySmall" style={[styles.muted, { marginBottom: 4 }]}>
+                Tipo de resultado
+              </Text>
+              <SegmentedButtons
+                value={resultPositions}
+                onValueChange={(v) => setResultPositions(v as '3' | '1')}
+                style={styles.field}
+                buttons={[
+                  { value: '3', label: 'Estándar (3 premios)' },
+                  { value: '1', label: 'Un solo resultado' },
+                ]}
               />
               {error && <HelperText type="error">{error}</HelperText>}
               <Button mode="contained" onPress={handleSave} loading={saving} buttonColor={colors.brand}>

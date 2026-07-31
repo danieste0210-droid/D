@@ -309,9 +309,19 @@ model Sale {
   // regla de coincidencia por últimas N cifras en lotteries.service.processAwards().
   awards Award[]
 
+  // Resultado contra el que ya se evaluó esta venta (haya ganado o no) -- evita que una venta que
+  // sigue "activa" (status solo cambia al cancelar) se vuelva a evaluar contra un resultado
+  // POSTERIOR de la misma lotería, lo cual además de ser incorrecto (una venta es para un sorteo
+  // puntual, no para todos los futuros) puede chocar con la restricción única (sale_id, position)
+  // de Award. Se limpia en resultsService.reverse() si el resultado se revierte, para que la
+  // venta vuelva a quedar elegible ante un resultado corregido.
+  resolvedResultId String?  @map("resolved_result_id")
+  resolvedResult   Result?  @relation("ResolvedSales", fields: [resolvedResultId], references: [id])
+
   @@index([sellerId, createdAt])
   @@index([lotteryId, createdAt])
   @@index([batchId])
+  @@index([resolvedResultId])
   @@map("sales")
 }
 
@@ -335,6 +345,7 @@ model Result {
   reversalReason String?   @map("reversal_reason")
 
   awards Award[]
+  resolvedSales Sale[] @relation("ResolvedSales")
 
   @@unique([lotteryId, drawDate])
   @@map("results")
@@ -349,6 +360,11 @@ model Award {
   // Posición del resultado que coincidió (1, 2 o 3) -- una venta puede tener hasta 3 awards,
   // uno por cada posición ganadora.
   position      Int
+  // Qué regla de coincidencia generó este award ("ultimas", "primeras", "ultimas3", "ultimas2",
+  // "combinado", "palet-mayor", "palet-menor", "chance3") -- una misma venta puede ganar VARIAS
+  // categorías a la vez en la MISMA posición (ej. un billete de 4 cifras exacto también califica
+  // para los bonos de primeras/últimas cifras), así que "position" solo no identifica un award.
+  category      String
   amount        Decimal        @db.Decimal(12, 2)
   status        AwardStatus    @default(pending)
   paymentMethod PaymentMethod? @map("payment_method")
@@ -359,7 +375,10 @@ model Award {
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  @@unique([saleId, position])
+  // Evita doble-conteo dentro de UN mismo cálculo (misma venta, mismo resultado, misma posición,
+  // misma categoría), pero SÍ permite que una venta gane de nuevo ante un resultado corregido
+  // (resultId distinto) tras una reversión -- ver resolvedResultId en Sale.
+  @@unique([saleId, resultId, position, category])
   @@map("awards")
 }
 

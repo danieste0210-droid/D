@@ -42,10 +42,11 @@ function buildService(
   const txAwardCreate = jest.fn().mockResolvedValue(undefined);
   const txResultCreate = jest.fn().mockResolvedValue({ id: 'result-1' });
   const txSaleFindMany = jest.fn().mockResolvedValue(sales);
+  const txSaleUpdateMany = jest.fn().mockResolvedValue({ count: 0 });
 
   const tx = {
     result: { create: txResultCreate },
-    sale: { findMany: txSaleFindMany },
+    sale: { findMany: txSaleFindMany, updateMany: txSaleUpdateMany },
     award: { create: txAwardCreate },
   };
 
@@ -62,7 +63,7 @@ function buildService(
   const notifications = { sendToUser: jest.fn().mockResolvedValue(undefined) };
 
   const service = new LotteriesService(prisma as any, notifications as any);
-  return { service, prisma, notifications, tx: { txAwardCreate, txResultCreate, txSaleFindMany } };
+  return { service, prisma, notifications, tx: { txAwardCreate, txResultCreate, txSaleFindMany, txSaleUpdateMany } };
 }
 
 describe('LotteriesService.processAwards', () => {
@@ -182,13 +183,29 @@ describe('LotteriesService.processAwards', () => {
     expect(tx.txAwardCreate).not.toHaveBeenCalled();
   });
 
-  it('solo considera ventas activas de esa lotería (filtro pasado a Prisma)', async () => {
+  it('solo considera ventas activas de esa lotería que no se hayan resuelto ya contra otro resultado', async () => {
     const { service, tx } = buildService({ sales: [] });
 
     await service.processAwards(dto, 'user-1');
 
     expect(tx.txSaleFindMany).toHaveBeenCalledWith({
-      where: { lotteryId: 'lottery-1', status: SaleStatus.active },
+      where: { lotteryId: 'lottery-1', status: SaleStatus.active, resolvedResultId: null },
+    });
+  });
+
+  it('marca las ventas evaluadas como resueltas contra este resultado (ganen o no)', async () => {
+    const { service, tx } = buildService({
+      sales: [
+        { id: 'sale-1', sellerId: 'seller-1', amount: 5, numberPlayed: '1234', betType: 'recto' }, // gana
+        { id: 'sale-2', sellerId: 'seller-2', amount: 5, numberPlayed: '99', betType: 'recto' }, // pierde
+      ],
+    });
+
+    await service.processAwards(dto, 'user-1');
+
+    expect(tx.txSaleUpdateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['sale-1', 'sale-2'] } },
+      data: { resolvedResultId: 'result-1' },
     });
   });
 

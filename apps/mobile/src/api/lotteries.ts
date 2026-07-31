@@ -8,19 +8,23 @@ export interface Lottery {
   active: boolean;
   blocked: boolean;
   maxAmountPerNumber: string | null;
+  // 3 = estándar (1er/2do/3er premio), 1 = un solo resultado (ej. El Salvador) -- determina qué
+  // modalidades se ofrecen y si el formulario de resultado pide 2do/3er premio.
+  resultPositions: number;
 }
 
 export interface CreateLotteryPayload {
   name: string;
   maxAmountPerNumber?: number;
+  resultPositions?: number;
 }
 
 export interface ProcessAwardsPayload {
   lotteryId: string;
   drawDate: string;
   firstNumber: string;
-  secondNumber: string;
-  thirdNumber: string;
+  secondNumber?: string;
+  thirdNumber?: string;
 }
 
 export interface LotteryForDay extends Lottery {

@@ -42,6 +42,8 @@ export const endpoints = {
   results: {
     reverse: (id: string) => `/results/reverse/${id}`,
     pendingAwards: '/results/awards/pending',
+    approveAward: (id: string) => `/results/awards/${id}/approve`,
+    payAward: (id: string) => `/results/awards/${id}/pay`,
   },
   users: {
     create: '/user/create',

@@ -140,16 +140,28 @@ export class LotteriesService {
         },
       });
 
+      // resolvedResultId: null -- excluye ventas que ya se evaluaron contra un resultado anterior
+      // de esta misma lotería. Sin este filtro, una venta que sigue "activa" (status solo cambia
+      // al cancelar) se re-evaluaría contra CADA resultado futuro de la lotería indefinidamente,
+      // lo cual además de ser incorrecto de negocio puede chocar con la restricción única
+      // (sale_id, position) de Award si sus cifras vuelven a coincidir por casualidad.
       const activeSales = await tx.sale.findMany({
-        where: { lotteryId: dto.lotteryId, status: SaleStatus.active },
+        where: { lotteryId: dto.lotteryId, status: SaleStatus.active, resolvedResultId: null },
       });
 
       const sellerIds: string[] = [];
       let count = 0;
 
-      const createAward = async (saleId: string, position: number, multiplier: number, amount: number, sellerId: string) => {
+      const createAward = async (saleId: string, position: number, category: string, multiplier: number, amount: number, sellerId: string) => {
         await tx.award.create({
-          data: { saleId, resultId: createdResult.id, position, amount: calculatePayout(amount, multiplier), status: AwardStatus.pending },
+          data: {
+            saleId,
+            resultId: createdResult.id,
+            position,
+            category,
+            amount: calculatePayout(amount, multiplier),
+            status: AwardStatus.pending,
+          },
         });
         sellerIds.push(sellerId);
         count += 1;
@@ -164,7 +176,7 @@ export class LotteriesService {
           const winningSlice = winningNumbers[0]!.slice(-digitCount);
           const multiplier = combinadoMap.get(digitCount);
           if (multiplier != null && isPermutation(sale.numberPlayed, winningSlice)) {
-            await createAward(sale.id, 1, multiplier, amount, sale.sellerId);
+            await createAward(sale.id, 1, 'combinado', multiplier, amount, sale.sellerId);
           }
           continue;
         }
@@ -176,7 +188,7 @@ export class LotteriesService {
           if (second == null) continue;
           const derived = winningNumbers[0]!.slice(-2) + second.slice(-1);
           if (chance3MultiplierValue != null && sale.numberPlayed === derived) {
-            await createAward(sale.id, 1, chance3MultiplierValue, amount, sale.sellerId);
+            await createAward(sale.id, 1, 'chance3', chance3MultiplierValue, amount, sale.sellerId);
           }
           continue;
         }
@@ -198,7 +210,7 @@ export class LotteriesService {
             if (!step.matches) continue;
             const multiplier = paletMap.get(step.tier);
             if (multiplier != null) {
-              await createAward(sale.id, step.position, multiplier, amount, sale.sellerId);
+              await createAward(sale.id, step.position, `palet-${step.tier}`, multiplier, amount, sale.sellerId);
             }
             break; // solo se paga el primer par que coincida, aunque falte su multiplicador.
           }
@@ -213,7 +225,7 @@ export class LotteriesService {
           const matchesUltimas = winningNumber.slice(-digitCount) === sale.numberPlayed;
           const multiplierUltimas = rectoMap.get(`${digitCount}-${position}-${MatchType.ultimas}`);
           if (matchesUltimas && multiplierUltimas != null) {
-            await createAward(sale.id, position, multiplierUltimas, amount, sale.sellerId);
+            await createAward(sale.id, position, MatchType.ultimas, multiplierUltimas, amount, sale.sellerId);
           }
 
           // Bonos exclusivos de billetes de 4 cifras completas: primeras 3, últimas 3, últimas 2
@@ -228,11 +240,20 @@ export class LotteriesService {
             for (const bonus of bonuses) {
               const multiplier = rectoMap.get(`${digitCount}-${position}-${bonus.matchType}`);
               if (bonus.matches && multiplier != null) {
-                await createAward(sale.id, position, multiplier, amount, sale.sellerId);
+                await createAward(sale.id, position, bonus.matchType, multiplier, amount, sale.sellerId);
               }
             }
           }
         }
+      }
+
+      // Marca TODAS las ventas evaluadas (ganaron o no) como resueltas contra este resultado, para
+      // que no vuelvan a evaluarse ante un resultado futuro de la misma lotería.
+      if (activeSales.length > 0) {
+        await tx.sale.updateMany({
+          where: { id: { in: activeSales.map((s) => s.id) } },
+          data: { resolvedResultId: createdResult.id },
+        });
       }
 
       return { result: createdResult, winnerSellerIds: sellerIds, awardsCreated: count };

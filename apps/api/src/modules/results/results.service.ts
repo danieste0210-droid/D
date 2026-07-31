@@ -9,9 +9,9 @@ export class ResultsService {
   constructor(private readonly prisma: PrismaService) {}
 
   // Reversión de un resultado erróneo: nunca se borra, se marca revertido (log inmutable vía
-  // AuditInterceptor en el controller). Los awards "pending" asociados se marcan reversed;
-  // los que ya estaban "paid" NO se tocan automáticamente -- el dinero ya salió, requieren
-  // seguimiento manual, por eso se reportan aparte en la respuesta.
+  // AuditInterceptor en el controller). Los awards "pending" o "approved" asociados (todavía no
+  // pagados) se marcan reversed; los que ya estaban "paid" NO se tocan automáticamente -- el
+  // dinero ya salió, requieren seguimiento manual, por eso se reportan aparte en la respuesta.
   async reverse(id: string, reason: string) {
     const result = await this.prisma.result.findUnique({ where: { id }, include: { awards: true } });
     if (!result) throw new NotFoundException('Resultado no encontrado');
@@ -26,8 +26,15 @@ export class ResultsService {
       });
 
       await tx.award.updateMany({
-        where: { resultId: id, status: AwardStatus.pending },
+        where: { resultId: id, status: { in: [AwardStatus.pending, AwardStatus.approved] } },
         data: { status: AwardStatus.reversed, reversedAt: new Date() },
+      });
+
+      // Libera las ventas que se habían marcado como resueltas contra este resultado (ganaran o
+      // no) para que vuelvan a quedar elegibles ante un resultado corregido.
+      await tx.sale.updateMany({
+        where: { resolvedResultId: id },
+        data: { resolvedResultId: null },
       });
 
       return updated;
@@ -39,8 +46,13 @@ export class ResultsService {
     };
   }
 
+  // "Pendientes de pago": incluye tanto pending como approved -- un premio aprobado todavía no
+  // está pagado, así que debe seguir apareciendo en esta cola hasta que se pague.
   pendingAwards() {
-    return this.prisma.award.findMany({ where: { status: AwardStatus.pending }, include: { sale: true } });
+    return this.prisma.award.findMany({
+      where: { status: { in: [AwardStatus.pending, AwardStatus.approved] } },
+      include: { sale: true },
+    });
   }
 
   // pendiente -> aprobado: paso de revisión antes de pagar, no mueve dinero.

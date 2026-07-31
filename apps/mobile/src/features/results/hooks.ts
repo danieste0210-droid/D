@@ -21,3 +21,19 @@ export function useReverseResult() {
     },
   });
 }
+
+export function useApproveAward() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: resultsApi.approveAward,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [PENDING_AWARDS_KEY] }),
+  });
+}
+
+export function usePayAward() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, paymentMethod }: { id: string; paymentMethod: resultsApi.PaymentMethod }) => resultsApi.payAward(id, paymentMethod),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [PENDING_AWARDS_KEY] }),
+  });
+}
